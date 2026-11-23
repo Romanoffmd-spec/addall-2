@@ -142,6 +142,19 @@ if (FIRE.on) {
     this.user = null; sessionStorage.removeItem('addall2_uid'); location.hash = ''; App.boot();
   };
 
+  /* мастер первого запуска: текст про хранение и лишние для онлайн-версии пункты */
+  const _psetup = Pages.setup;
+  Pages.setup = function () {
+    const r = _psetup.apply(this, arguments);
+    const fix = () => {
+      document.querySelectorAll('.auth p.muted').forEach(p => { if (p.textContent.includes('только в этом браузере')) p.textContent = 'Первый запуск онлайн-версии. Создайте администратора платформы. Данные хранятся в Firebase (проект addall-2), доступ только у пользователей, которых заведёт администратор. Только тестовые данные, без реальных пациентов.'; });
+      const sr = document.getElementById('s_restore'); if (sr) sr.style.display = 'none';
+      document.querySelectorAll('.auth label').forEach(l => { if (/регистрироваться самим/.test(l.textContent)) l.style.display = 'none'; });
+    };
+    fix(); setTimeout(fix, 0);
+    return r;
+  };
+
   /* на странице входа: без самостоятельной регистрации (учётные записи создаёт администратор), сброс пароля письмом */
   const _plogin = Pages.login;
   Pages.login = async function (mode = 'login') {
