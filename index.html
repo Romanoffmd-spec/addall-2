@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>try{document.documentElement.setAttribute('data-theme',localStorage.getItem('addall2.theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'))}catch(e){}</script>
+<title>AddAll 2.0 · платформа клинических регистров</title>
+<link rel="icon" type="image/svg+xml" href="media/addall-icon.svg">
+<link rel="icon" type="image/png" href="media/addall-icon-64.png">
+<link rel="apple-touch-icon" href="media/addall-icon-180.png">
+<link rel="stylesheet" href="css/fonts.css">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/theme.css">
+</head>
+<body>
+<div class="loading">Загрузка AddAll 2.0…</div>
+<script src="js/core.js"></script>
+<script src="js/forms.js"></script>
+<script src="js/stats.js"></script>
+<script src="js/pages.js"></script>
+<script src="js/modules.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/qa.js"></script>
+<script src="js/trials.js"></script>
+<script src="js/journals.js"></script>
+<script src="js/docs.js"></script>
+<script src="js/library.js"></script>
+<script src="js/extras.js"></script>
+<script src="js/signup.js"></script>
+<script src="js/dendrite.js"></script>
+<script src="js/dendrite2.js"></script>
+<script src="js/dendrite3.js"></script>
+<script src="js/orgs.js"></script>
+<script src="js/mods.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/quality.js"></script>
+<script src="js/biostat.js"></script>
+<script src="js/worklist.js"></script>
+<script src="js/missing.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/fire.js"></script>
+<script src="js/net.js"></script>
+<script>
+  window.addEventListener('error', e => console.error('AddAll error:', e.message));
+  App.boot().catch(e => { document.body.innerHTML = '<div class="card err" style="margin:40px"><b>Не удалось запустить:</b> ' + e.message + '<br>Откройте файл в Chrome или Edge.</div>'; });
+</script>
+</body>
+</html>

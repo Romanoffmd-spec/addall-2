@@ -1,0 +1,50 @@
+rules_version = '2';
+// AddAll 2.0, онлайн-версия. Данные видит и меняет только активный участник (members/<uid>).
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function signed() { return request.auth != null; }
+    function mem() { return get(/databases/$(db)/documents/members/$(request.auth.uid)).data; }
+    function isMember() { return signed() && exists(/databases/$(db)/documents/members/$(request.auth.uid)); }
+    function active() { return isMember() && mem().active == true; }
+    function admin() { return active() && mem().admin == true; }
+    function booted() { return exists(/databases/$(db)/documents/meta/boot); }
+
+    // признак, что первый администратор уже создан: виден всем (нужен странице входа)
+    match /meta/boot {
+      allow read: if true;
+      allow create: if signed() && !booted()
+        && getAfter(/databases/$(db)/documents/members/$(request.auth.uid)).data.admin == true;
+      allow update, delete: if false;
+    }
+
+    match /members/{uid} {
+      allow read: if signed() && (request.auth.uid == uid || admin());
+      // первый администратор при первом запуске, дальше участников заводит только администратор
+      allow create: if (signed() && request.auth.uid == uid && !booted() && request.resource.data.admin == true)
+                    || admin();
+      allow update, delete: if admin();
+    }
+
+    // журнал аудита: только добавление
+    match /s_audit/{id} {
+      allow read: if active();
+      allow create: if active();
+      allow update, delete: if false;
+    }
+
+    // пользователи и настройки платформы: меняет администратор; сам пользователь может обновить свою запись
+    match /s_users/{id} {
+      allow read: if active();
+      allow write: if admin() || (active() && mem().userId == id);
+    }
+    match /s_settings/{id} {
+      allow read: if active();
+      allow write: if admin();
+    }
+
+    // все остальные хранилища (регистры, пациенты, события и т. д.)
+    match /{store}/{id} {
+      allow read, write: if active() && store.matches('s_.*') && !(store in ['s_audit', 's_users', 's_settings']);
+    }
+  }
+}
