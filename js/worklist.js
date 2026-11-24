@@ -35,7 +35,7 @@ const Out30 = {
     for (const list of byPatient.values()) list.sort((a, b) => b.date.localeCompare(a.date));
     for (const outcome of outcomes) {
       let operation;
-      if (outcome.anchorEventId) operation = operationsById.get(outcome.anchorEventId);
+      if (outcome.anchorEventId && operationsById.has(outcome.anchorEventId)) operation = operationsById.get(outcome.anchorEventId);
       else if (outcome.date) {
         const candidates = byPatient.get(outcome.patientId) || [];
         const index = candidates.findIndex(item => item.date <= outcome.date);

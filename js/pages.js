@@ -188,11 +188,12 @@ Routes.registry = async (main, id, tab = 'general') => {
       <div class="fld wide"><label class="flab">Описание, критерии включения</label><textarea class="inp" id="g_desc" rows="3" ${ro ? 'disabled' : ''}>${esc(reg.description || '')}</textarea></div>
       <div class="fld"><label class="flab">Статус</label><select class="inp" id="g_status" ${ro ? 'disabled' : ''}>${['черновик', 'пилот', 'активный', 'закрыт'].map(s => `<option ${reg.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
       <div class="fld"><label class="flab">Наблюдение каждые (дней), 0 = не напоминать</label><input class="inp" type="number" id="g_fu" value="${reg.followupEvery || 0}" ${ro ? 'disabled' : ''}></div>
+      <div class="fld wide"><label class="flab">Единица учёта: эпизод открывается событием</label><select class="inp" id="g_ep" ${ro ? 'disabled' : ''}>${reg.eventTypes.map(e => `<option value="${e.id}" ${Episodes.opener(reg) === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select><span class="fhint">Что регистр считает одним случаем. Хирургический аудит: операция. Регистр заболевания: диагноз. Кардиология: госпитализация. Остальные события пациента относятся к эпизоду по дате или по выбору в форме. Охват, полнота наблюдения и показатели качества считаются по эпизодам.</span></div>
       <div class="fld"><label class="flab">Событие-точка отсчёта для выживаемости</label><select class="inp" id="g_start" ${ro ? 'disabled' : ''}>${reg.eventTypes.map(e => `<option value="${e.id}" ${reg.keyDates?.start === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>
       <div class="fld"><label class="flab">Версия схемы</label><div class="calc">v${reg.version}</div></div>
     </div></div>
     ${ro ? '' : `<div class="card"><h3>Действия</h3><div class="row"><button class="btn" id="g_export">Экспорт структуры (JSON)</button><button class="btn" id="g_dup">Дублировать регистр</button><button class="btn danger" id="g_del">Удалить регистр</button></div><p class="muted">Экспорт структуры позволяет перенести регистр в другую установку AddAll без данных пациентов.</p></div>`}`;
-    const upd = () => { reg.name = $('#g_name').value; reg.description = $('#g_desc').value; reg.status = $('#g_status').value; reg.followupEvery = Number($('#g_fu').value || 0); reg.keyDates = { ...(reg.keyDates || {}), start: $('#g_start').value }; mark(); };
+    const upd = () => { reg.name = $('#g_name').value; reg.description = $('#g_desc').value; reg.status = $('#g_status').value; reg.followupEvery = Number($('#g_fu').value || 0); reg.keyDates = { ...(reg.keyDates || {}), start: $('#g_start').value }; reg.episode = { ...(reg.episode || {}), opener: $('#g_ep').value }; mark(); };
     $$('input,textarea,select', body).forEach(x => x.onchange = upd);
     if (!ro) {
       $('#g_export').onclick = () => { const c = clone(reg); ['id', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'].forEach(k => delete c[k]); download(slug(reg.name) + '_schema.json', JSON.stringify(c, null, 2), 'application/json'); };
@@ -287,8 +288,9 @@ function etDialog(et, done) {
     <div class="fld"><label class="flab">Подпись поля даты</label><input class="inp" id="e_d" value="${esc(et.dateLabel || 'Дата')}"></div>
     <div class="fld"><label class="flab">Цвет на таймлайне</label><input class="inp" type="color" id="e_c" value="${esc(et.color || '#888888')}"></div>
     <div class="fld"><label class="flab">Однократное событие</label><select class="inp" id="e_s"><option value="0">нет, может повторяться</option><option value="1" ${et.single ? 'selected' : ''}>да, одно на пациента</option></select></div>
+    <div class="fld"><label class="flab">Ожидается в каждом эпизоде через (дней)</label><input class="inp" type="number" min="0" step="1" id="e_x" value="${et.expect && Number.isFinite(Number(et.expect.days)) ? esc(et.expect.days) : ''}" placeholder="пусто: не обязательно"><span class="fhint">Например, патоморфология через 30 дней после операции. Если срок прошёл, а формы нет, случай виден как пропуск в охвате и показателях.</span></div>
     </div><div class="row end"><button class="btn primary" id="e_ok">Готово</button></div>`);
-  $('#e_ok', m).onclick = () => { et.name = $('#e_n', m).value; et.dateLabel = $('#e_d', m).value; et.color = $('#e_c', m).value; et.single = $('#e_s', m).value === '1'; m.close(); done(); };
+  $('#e_ok', m).onclick = () => { et.name = $('#e_n', m).value; et.dateLabel = $('#e_d', m).value; et.color = $('#e_c', m).value; et.single = $('#e_s', m).value === '1'; const ex = $('#e_x', m).value.trim(); if (ex === '') delete et.expect; else et.expect = { days: Math.max(0, Math.round(Number(ex) || 0)) }; m.close(); done(); };
 }
 
 function fieldDialog(reg, et, field, done, patientLevel) {
@@ -499,6 +501,9 @@ Routes.patient = async (main, id) => {
   if (!visibleP(p)) { main.innerHTML = '<div class="card err">Пациент другого центра: нет доступа.</div>'; return; }
   const [reg, regs, users, allEv, proms, mdts, audit, qs, allocs, trials] = await Promise.all([DB.get('registries', p.registryId), Data.registries(), Data.users(), Data.events(), DB.all('proms'), DB.all('mdt'), DB.all('audit'), DB.all('queries'), DB.all('alloc'), DB.all('trials')]);
   const ev = allEv.filter(e => e.patientId === id).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const epList = reg ? Episodes.list(reg, ev) : [];
+  const epLink = epList.length > 1 ? Episodes.link(reg, ev) : new Map();
+  const epNo = new Map(epList.map((e, i) => [e.id, i + 1]));
   const pr = proms.filter(x => x.patientId === id).sort((a, b) => a.due.localeCompare(b.due));
   const pm = mdts.flatMap(mt => (mt.cases || []).filter(c => c.patientId === id).map(c => ({ ...c, mt })));
   const hist = audit.filter(a => a.recId === id || ev.some(e => e.id === a.recId)).sort((a, b) => b.ts.localeCompare(a.ts));
@@ -513,7 +518,7 @@ Routes.patient = async (main, id) => {
       const vals = computeValues(reg, p, et, e.data, e.date); const c = completeness(et, vals);
       const shown = formFields(et).filter(f => condOK(f.showIf, vals) && !isEmpty(vals[f.key]));
       return `<div class="tl" style="--c:${et.color}"><div class="tl-dot"></div><div class="tl-body">
-        <div class="row between"><div><b class="tl-t">${esc(et.name)}</b> <span class="muted">${esc(et.dateLabel || 'Дата')}: <b>${fmtDate(e.date)}</b></span></div>
+        <div class="row between"><div><b class="tl-t">${esc(et.name)}</b> ${epLink.has(e.id) ? `<span class="tag" title="Эпизод регистра">эпизод ${epNo.get(epLink.get(e.id))}</span> ` : ''}<span class="muted">${esc(et.dateLabel || 'Дата')}: <b>${fmtDate(e.date)}</b></span></div>
         <div class="row">${e.locked ? '<span class="tag lockt">🔒</span>' : ''}${e.verified ? '<span class="tag okt" title="Проверено с первичной документацией">✓ SDV</span>' : ''}${(() => { const n = qs.filter(q => q.eventId === e.id && q.status !== 'закрыт').length; return n ? `<span class="tag warnt">⚑ ${n}</span>` : ''; })()}${e.status === 'черновик' ? '<span class="tag warnt">черновик</span>' : ''}<span class="tag ${c.pct < 100 ? 'warnt' : 'okt'}" title="${esc(c.missing.join(', '))}">полнота ${c.pct}%</span>${can('edit') ? `<button class="btn xs" data-ed="${e.id}">Открыть</button>` : `<button class="btn xs" data-ed="${e.id}">Просмотр</button>`}</div></div>
         <div class="kv">${shown.slice(0, 14).map(f => `<div><b>${esc(f.label)}</b><span>${showVal(f, vals[f.key], users)}</span></div>`).join('')}${shown.length > 14 ? `<div class="muted">и ещё ${shown.length - 14}…</div>` : ''}</div>
         ${c.missing.length ? `<div class="miss">${formFields(et).filter(f => f.type !== 'calc' && (f.required || f.key_) && condOK(f.showIf, vals) && isEmpty(vals[f.key])).slice(0, 8).map(f => `<a href="javascript:void 0" class="tlmiss ${f.required ? 'rq' : 'ds'}" data-jmp="${e.id}|${f.key}">⚠ ${esc(f.label)}: не отвечено</a>`).join(' ')}${c.missing.length > 8 ? ` <span class="muted">и ещё ${c.missing.length - 8}</span>` : ''}</div>` : ''}</div></div>`;
@@ -555,12 +560,21 @@ async function eventDialog(p, reg, ev) {
     <div class="row between"><div class="fld" style="max-width:260px"><label class="flab">${esc(et.dateLabel || 'Дата')} <i class="req">*</i></label><input class="inp" type="date" id="evDate" value="${esc(ev.date || (ev.out30Due ? '' : today()))}" ${ro ? 'disabled' : ''}></div><div class="row" id="evStatus"></div></div>
     ${ev.out30Due ? `<div class="fld"><label for="evOut30Checked" class="flab">Дата проверки исхода 30 дней</label><input class="inp" type="date" id="evOut30Checked" min="${esc(ev.out30Due)}" max="${today()}" value="${esc(ev.out30CheckedOn || '')}" ${ro ? 'disabled' : ''}><span class="fhint">Укажите дату, когда проверено, что исход известен как минимум до ${fmtDate(ev.out30Due)}.</span></div>` : ''}
     ${ev.locked ? '<div class="miss">Событие заблокировано после проверки. Изменения возможны только после разблокировки руководителем (с указанием причины).</div>' : ''}
-    <div id="evForm"></div><div id="evQA"></div>
+    <div id="evEp"></div><div id="evForm"></div><div id="evQA"></div>
     <div class="row between sticky-bottom"><div>${!isNew && can('delete') ? '<button class="btn danger" id="evDel">Удалить событие</button>' : ''}</div>
     <div class="row"><span class="muted" id="evErr"></span>${ro ? '' : '<button class="btn" id="evDraft">Сохранить черновик</button><button class="btn primary" id="evSave">Сохранить</button>'}</div></div>`, { full: true });
   if (!isNew && !ro && ev.status === 'завершено' && !can('users')) { const d = $('#evDate', m); d.disabled = true; d.title = 'Дату сохранённой записи меняет администратор'; d.insertAdjacentHTML('afterend', ' <a href="javascript:void 0" class="small" id="evFix">запросить исправление</a>'); setTimeout(() => { const a = $('#evFix', m); if (a) a.onclick = () => correctionDialog(p, ev); }, 0); }
   const formRoot = $('#evForm', m);
   if (ro) formRoot.dataset.ro = '1';
+  /* к какому эпизоду относится событие, если у пациента их несколько */
+  if (et.id !== Episodes.opener(reg)) {
+    const own = (await Data.events(reg.id)).filter(e => e.patientId === p.id);
+    const eps = Episodes.list(reg, own);
+    const anchorIsEpisode = !ev.anchorEventId || eps.some(e => e.id === ev.anchorEventId);
+    if (eps.length > 1 && anchorIsEpisode) {
+      $('#evEp', m).innerHTML = `<div class="fld" style="max-width:420px"><label class="flab" for="evEpisode">Эпизод</label><select class="inp" id="evEpisode" ${ro ? 'disabled' : ''}><option value="">автоматически по дате</option>${eps.map((e, i) => `<option value="${esc(e.id)}" ${ev.anchorEventId === e.id ? 'selected' : ''}>${esc(Episodes.title(reg, e, i))}</option>`).join('')}</select><span class="fhint">У пациента несколько эпизодов. Укажите, к какому относится эта запись, если дата не даёт однозначного ответа.</span></div>`;
+    }
+  }
   const draftKey = ev.id || ('new-' + (ev.anchorEventId || ''));
   let read = renderEventForm(formRoot, reg, p, et, ev.data || {}, ev.date || today(), users, draftKey);
   if ($('#evAI', m)) $('#evAI', m).onclick = () => AI.dialog({ title: `${et.name} (${reg.name})`, fields: formFields(et), users, dateLabel: et.dateLabel || 'Дата', onApply: (take, date, ow) => {
@@ -584,6 +598,8 @@ async function eventDialog(p, reg, ev) {
     const check = $('#evOut30Checked', m);
     if (check?.value && (check.value < out30Due || check.value > today())) return toast('Проверьте дату подтверждения исхода', 'err');
     if (check) record.out30CheckedOn = check.value;
+    const epSel = $('#evEpisode', m);
+    if (epSel) { if (epSel.value) record.anchorEventId = epSel.value; else delete record.anchorEventId; }
     const obj = { ...record, patientId: p.id, registryId: reg.id, type: et.id, date, data, status: draft ? 'черновик' : 'завершено', schemaVersion: reg.version };
     try { await DB.put('events', obj); }
     catch (error) { return toast(error.message, 'err'); }

@@ -2,21 +2,33 @@
 'use strict';
 
 const Coverage = {
-  registered(reg, patients, events, filter) {
+  /* эпизоды (случаи) за период: каждое сохранённое событие выбранного типа; два события одного пациента это два эпизода */
+  episodes(reg, patients, events, filter) {
     const people = new Set(patients.filter(p => p.registryId === reg.id && (!filter.center || p.center === filter.center)).map(p => p.id));
-    const observed = new Set();
-    for (const event of events) {
-      if (event.registryId === reg.id && event.type === filter.eventType && event.status !== 'черновик'
-        && event.date >= filter.from && event.date <= filter.to && people.has(event.patientId)) {
-        observed.add(event.patientId);
-      }
+    return events.filter(event => event.registryId === reg.id && event.type === filter.eventType && event.status !== 'черновик'
+      && event.date >= filter.from && event.date <= filter.to && people.has(event.patientId));
+  },
+  registered(reg, patients, events, filter) { return this.episodes(reg, patients, events, filter).length; },
+  /* полнота наблюдения по тем же эпизодам: исход 30 дней и формы, ожидаемые в каждом эпизоде */
+  async followup(reg, patients, events, filter) {
+    const episodes = this.episodes(reg, patients, events, filter);
+    const ids = new Set(episodes.map(e => e.id));
+    const lines = [];
+    if (Out30.startType(reg) === filter.eventType && Out30.form(reg, filter.eventType)) {
+      const rows = (await Out30.build()).filter(x => x.reg.id === reg.id && ids.has(x.e.id));
+      const n = k => rows.filter(x => x.state === k).length;
+      const due = n('done') + n('due') + n('partial');
+      lines.push({ name: 'Исход 30 дней', done: n('done'), due, missing: n('due'), partial: n('partial'), wait: n('wait'), link: '#out30' });
     }
-    return observed.size;
+    if (filter.eventType === Episodes.opener(reg)) {
+      for (const x of Episodes.completeness(reg, events, episodes)) lines.push({ name: x.et.name, done: x.done, due: x.due, missing: x.missing, partial: 0, wait: x.wait });
+    }
+    return { total: episodes.length, lines };
   },
   estimate(observed, expected) {
     if (expected == null) return 'Внесите число из независимого источника, чтобы рассчитать охват.';
-    if (observed > expected) return 'Зарегистрировано больше пациентов, чем в источнике. Сверьте когорту, период и дубли.';
-    if (!expected) return 'По источнику за этот период подходящих пациентов нет. Процент не рассчитывается.';
+    if (observed > expected) return 'Зарегистрировано больше случаев, чем в источнике. Сверьте когорту, период и дубли.';
+    if (!expected) return 'По источнику за этот период подходящих случаев нет. Процент не рассчитывается.';
     return `Охват: ${(100 * observed / expected).toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% (${observed} из ${expected}).`;
   }
 };
@@ -27,7 +39,7 @@ Routes.coverage = async (main, regId = '') => {
   if (!reg) { main.innerHTML = '<div class="head"><h1>Охват регистра</h1></div>' + emptyState('Нет регистров.'); return; }
   const [patients, events, stored] = await Promise.all([Data.patients(reg.id), Data.events(reg.id), DB.all('coverage')]);
   const screens = (Routes.coverage.filters ||= {});
-  const filter = screens[reg.id] ||= { from: today().slice(0, 4) + '-01-01', to: today(), eventType: Out30.startType(reg) || '', center: '' };
+  const filter = screens[reg.id] ||= { from: today().slice(0, 4) + '-01-01', to: today(), eventType: Episodes.opener(reg) || '', center: '' };
   const types = reg.eventTypes || [];
   if (!types.some(type => type.id === filter.eventType)) filter.eventType = types[0]?.id || '';
   const history = stored.filter(x => x.registryId === reg.id);
@@ -36,28 +48,43 @@ Routes.coverage = async (main, regId = '') => {
   main.innerHTML = `
     <div class="head"><h1>Охват регистра</h1>${regSelect(regs, reg.id, 'covReg', false)}</div>
     <div class="card">
-      <p>Сверьте число уникальных пациентов регистра с независимым списком подходящих пациентов за тот же период, например с операционным журналом.</p>
+      <p>Сверьте число случаев (эпизодов) в регистре с независимым списком подходящих случаев за тот же период, например с операционным журналом.</p>
       <div class="grid">
         <div class="fld"><label class="flab" for="covFrom">Начало периода</label><input class="inp" id="covFrom" type="date" value="${esc(filter.from)}"></div>
         <div class="fld"><label class="flab" for="covTo">Конец периода</label><input class="inp" id="covTo" type="date" value="${esc(filter.to)}"></div>
         <div class="fld"><label class="flab" for="covOrg">Учреждение в карточке пациента</label><select class="inp" id="covOrg"><option value="">Все учреждения</option>${orgs.map(name => `<option value="${esc(name)}" ${name === filter.center ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></div>
-        <div class="fld"><label class="flab" for="covType">Событие для включения</label><select class="inp" id="covType">${types.map(type => `<option value="${esc(type.id)}" ${type.id === filter.eventType ? 'selected' : ''}>${esc(type.name)}</option>`).join('')}</select></div>
+        <div class="fld"><label class="flab" for="covType">Единица учёта: эпизод открывается событием</label><select class="inp" id="covType">${types.map(type => `<option value="${esc(type.id)}" ${type.id === filter.eventType ? 'selected' : ''}>${esc(type.name)}${type.id === Episodes.opener(reg) ? ' (эпизод регистра)' : ''}</option>`).join('')}</select></div>
       </div>
-      <p class="muted">В расчёт входят пациенты с сохранённым событием выбранного типа. При нескольких таких событиях пациент учитывается один раз. Черновики пропускаются.</p>
+      <p class="muted">Каждое сохранённое событие выбранного типа это отдельный случай: две операции у одного пациента дают два случая. Черновики пропускаются. Те же случаи используются для полноты наблюдения ниже и для показателей качества.</p>
       <p id="covResult" aria-live="polite"></p>
       ${canSave && filter.eventType ? `
         <form id="covForm" class="grid">
-          <div class="fld"><label class="flab" for="covExpected">Подходящих пациентов в источнике</label><input class="inp" id="covExpected" type="number" min="0" step="1" required></div>
+          <div class="fld"><label class="flab" for="covExpected">Подходящих случаев в источнике</label><input class="inp" id="covExpected" type="number" min="0" step="1" required></div>
           <div class="fld"><label class="flab" for="covSource">Источник и критерии отбора</label><input class="inp" id="covSource" maxlength="250" placeholder="Например, операционный журнал, резекции по поводу КРР" required></div>
           <div class="row"><button type="submit" class="btn primary">Сохранить сверку</button></div>
         </form>` : ''}
     </div>
+    <div class="card"><h2>Полнота наблюдения за период</h2><div id="covFollow"></div></div>
     <div class="card"><h2>История сверок</h2><div id="covHistory"></div></div>`;
   $('#covReg', main).onchange = e => go('coverage/' + e.target.value);
 
   const read = () => Object.assign(filter, { from: $('#covFrom', main).value, to: $('#covTo', main).value,
     eventType: $('#covType', main).value, center: $('#covOrg', main).value });
   const valid = () => filter.eventType && filter.from && filter.to && filter.from <= filter.to;
+  const pct = (a, b) => b ? ' (' + (100 * a / b).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + '%)' : '';
+  let followSeq = 0;
+  const renderFollow = async () => {
+    const box = $('#covFollow', main); if (!box) return;
+    if (!valid()) { box.innerHTML = ''; return; }
+    const seq = ++followSeq;
+    const f = await Coverage.followup(reg, patients, events, filter);
+    if (seq !== followSeq) return;
+    box.innerHTML = !f.lines.length
+      ? `<p class="muted">Для этого события нет ожидаемых форм. Укажите в конструкторе (Формы событий, «Настроить»), какие формы ожидаются в каждом эпизоде и через сколько дней, например патоморфология через 30 дней.</p>`
+      : `<p>Случаев за период: <b>${f.total}</b>.</p><table class="tbl"><thead><tr><th>Что ожидается</th><th>Есть</th><th>Нет, срок наступил</th><th>Срок не наступил</th></tr></thead><tbody>
+        ${f.lines.map(x => `<tr><td>${x.link ? `<a href="${x.link}">${esc(x.name)}</a>` : esc(x.name)}</td><td><b>${x.done}</b> из ${x.due}${pct(x.done, x.due)}</td><td>${x.missing}${x.partial ? ` + ${x.partial} заполнено не полностью` : ''}</td><td>${x.wait}</td></tr>`).join('')}</tbody></table>
+        <p class="muted small">Случай без формы не пропадает: он считается как «нет, срок наступил» здесь и как «исход неизвестен» в показателях качества.</p>`;
+  };
   const renderResult = () => {
     const list = history.filter(x => x.from === filter.from && x.to === filter.to && x.eventType === filter.eventType && x.center === filter.center)
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -66,6 +93,7 @@ Routes.coverage = async (main, regId = '') => {
     $('#covResult', main).textContent = valid()
       ? `В регистре: ${observed}. ${Coverage.estimate(observed, latest?.expected)}`
       : 'Выберите событие и проверьте границы периода.';
+    renderFollow();
     $('#covHistory', main).innerHTML = list.length ? `<table class="tbl"><thead><tr><th>Дата сверки</th><th>В источнике</th><th>Источник и отбор</th></tr></thead><tbody>
       ${list.map(item => `<tr><td>${fmtDT(item.createdAt)}</td><td>${esc(item.expected)}</td><td>${esc(item.source)}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">За выбранный период сверок пока нет.</p>';
@@ -79,7 +107,7 @@ Routes.coverage = async (main, regId = '') => {
     read();
     const source = $('#covSource', main).value.trim();
     const expected = $('#covExpected', main).valueAsNumber;
-    if (!valid() || !source || !Number.isSafeInteger(expected) || expected < 0) return toast('Проверьте период, число пациентов и источник', 'err');
+    if (!valid() || !source || !Number.isSafeInteger(expected) || expected < 0) return toast('Проверьте период, число случаев и источник', 'err');
     const button = $('button[type=submit]', form);
     button.disabled = true;
     try {

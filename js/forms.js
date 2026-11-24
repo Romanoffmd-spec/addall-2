@@ -684,7 +684,7 @@ function scoreInstrument(ins, answers) {
 /* оценка показателя качества */
 function evalIndicator(ind, events, patients, reg) {
   const et = reg.eventTypes.find(e => e.id === ind.et);
-  let den = 0, num = 0, miss = 0, naN = 0; const denIds = [], numIds = [], missIds = [];
+  let den = 0, num = 0, miss = 0, naN = 0, noForm = 0; const denIds = [], numIds = [], missIds = [];
   const patientById = new Map(patients.filter(p => !p.registryId || p.registryId === reg.id).map(p => [p.id, p]));
   const markMissing = e => { miss++; missIds.push(e.id); };
   events.filter(e => e.type === ind.et && (!e.registryId || e.registryId === reg.id)).forEach(e => {
@@ -709,7 +709,17 @@ function evalIndicator(ind, events, patients, reg) {
     }
     den++; denIds.push(e.id); if (condOK(ind.num, v)) { num++; numIds.push(e.id); }
   });
-  const r = { den, num, miss, na: naN, pct: den ? Math.round(num / den * 1000) / 10 : null };
+  /* эпизоды, у которых ожидаемой формы нет совсем: исход неизвестен, случай виден как пропуск, а не теряется */
+  if (typeof Episodes === 'object' && et?.expect && Number.isFinite(Number(et.expect.days)) && ind.et !== Episodes.opener(reg)) {
+    const regEvents = events.filter(e => !e.registryId || e.registryId === reg.id);
+    const link = Episodes.link(reg, regEvents);
+    const covered = new Set(regEvents.filter(e => e.type === ind.et).map(e => link.get(e.id)).filter(Boolean));
+    const t0 = today();
+    for (const ep of Episodes.list(reg, regEvents)) {
+      if (!covered.has(ep.id) && patientById.has(ep.patientId) && addDays(ep.date, Number(et.expect.days)) <= t0) { markMissing(ep); noForm++; }
+    }
+  }
+  const r = { den, num, miss, na: naN, noForm, pct: den ? Math.round(num / den * 1000) / 10 : null };
   /* списки событий для перехода к пациентам; неперечисляемые, чтобы не попадать в контекст ИИ */
   Object.defineProperties(r, { denIds: { value: denIds }, numIds: { value: numIds }, missIds: { value: missIds } });
   return r;

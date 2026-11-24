@@ -64,14 +64,14 @@ const QI = {
       const rows = ids.map(id => evById.get(id)).filter(Boolean).map(e => { const p = patients.find(y => y.id === e.patientId); return { e, p }; })
         .sort((a, b) => String(b.e.date || '').localeCompare(String(a.e.date || '')));
       return `<h4 style="margin:16px 0 6px">${title} <span class="muted">${rows.length}</span></h4>${hint ? `<p class="muted small" style="margin:0 0 6px">${hint}</p>` : ''}
-        ${rows.length ? `<table class="tbl small"><tbody>${rows.map(r => `<tr><td><a href="#patient/${r.p ? r.p.id : ''}" data-close>${esc(r.p ? pname(r.p) : '?')}</a></td><td>${fmtDate(r.e.date)}</td><td class="muted">${esc(r.e.status || '')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted small">нет</p>'}`;
+        ${rows.length ? `<table class="tbl small"><tbody>${rows.map(r => `<tr><td><a href="#patient/${r.p ? r.p.id : ''}" data-close>${esc(r.p ? pname(r.p) : '?')}</a></td><td>${fmtDate(r.e.date)}</td><td class="muted">${esc(r.e.type !== ind.et ? 'нет формы «' + (etById(reg, ind.et)?.name || '') + '»' : r.e.status || '')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted small">нет</p>'}`;
     };
     const numIds = x.numIds || [], denIds = x.denIds || [];
     const restIds = denIds.filter(id => !numIds.includes(id));
     const m = modal(`<h3>${esc(ind.name)}</h3>
       <p class="muted">${esc(reg.name)} · расчёт на ${fmtDate(today())} · без поправки на риск</p>
       <div class="qi-sum"><b>${x.den ? this.n1(x.pct) + '%' : 'нет данных'}</b><span>${x.num} из ${x.den}${ci ? ` · 95% ДИ ${this.n1(ci[0])}-${this.n1(ci[1])}%` : ''}</span><span class="qi-v">${esc(v.txt)}${this.tgtTxt(ind) ? ' · ' + this.tgtTxt(ind) : ''}</span></div>
-      ${x.miss ? list(x.missIds || [], 'Нет ответа в поле показателя', 'Эти случаи не вошли в расчёт. Заполните поле, чтобы цифра стала точнее.') : ''}
+      ${x.miss ? list(x.missIds || [], x.noForm ? 'Нет ответа или нет формы' : 'Нет ответа в поле показателя', x.noForm ? `Эти случаи не вошли в расчёт. У ${x.noForm} эпизодов форма «${esc(etById(reg, ind.et)?.name || '')}» ещё не создана, хотя срок наступил: исход неизвестен.` : 'Эти случаи не вошли в расчёт. Заполните поле, чтобы цифра стала точнее.') : ''}
       ${list(numIds, 'Событие наступило (числитель)')}
       ${list(restIds, 'Событие не наступило')}
       <p class="small" style="margin-top:14px"><b>Обоснование цели:</b> ${ind.ref ? esc(ind.ref) : (this.hasTarget(ind) ? '<span class="bad">источник цели не указан. Укажите его в настройке показателя, иначе цель нельзя защитить перед проверяющими.</span>' : 'цель не задана.')}</p>
