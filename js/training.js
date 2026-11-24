@@ -385,9 +385,39 @@ const TrainingGuide = {
     if (back) back.onclick = () => this.back();
     document.body.classList.toggle('tr-reveal', !away && !!step.reveal);
     this.target = !away && step.t ? this.find(step.t) : null;
-    if (this.target && focus) this.target.scrollIntoView({ block: 'center', inline: 'nearest' });
+    if (this.target && focus) this.reveal(this.target);
+    this.shownAt = performance.now();
     this.position();
+    this.track();
     if (focus) $('#trainGuideNext', this.root).focus({ preventScroll: true });
+  },
+  /* прокрутить так, чтобы цель была видна: высокие блоки к верху, остальные в центр */
+  reveal(node) {
+    const rect = node.getBoundingClientRect();
+    const tall = rect.height > innerHeight * 0.6;
+    try { node.scrollIntoView({ block: tall ? 'start' : 'center', inline: 'nearest', behavior: 'instant' }); }
+    catch (error) { node.scrollIntoView(tall); }
+  },
+  /* следит за целью каждый кадр: подгрузка данных, анимации и панель Safari сдвигают страницу без события scroll */
+  track() {
+    if (this.tracking) return;
+    this.tracking = true;
+    let last = '';
+    const tick = () => {
+      if (!this.running || !this.root?.isConnected) { this.tracking = false; return; }
+      const step = this.steps[this.index];
+      if (step?.t && this.onPage(step) && (!this.target || !this.target.isConnected)) this.target = this.find(step.t);
+      const r = this.target?.isConnected ? this.target.getBoundingClientRect() : null;
+      const key = r ? [r.left, r.top, r.width, r.height, innerWidth, innerHeight].map(Math.round).join() : 'none' + innerWidth + innerHeight;
+      if (key !== last) {
+        last = key;
+        /* в первые секунды после шага цель возвращается в поле зрения, если её сдвинула подгрузка */
+        if (r && performance.now() - (this.shownAt || 0) < 2500 && (r.bottom < 40 || r.top > innerHeight - 40)) this.reveal(this.target);
+        this.position();
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   },
   find(selector) {
     if (!selector) return null;
