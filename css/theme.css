@@ -600,6 +600,7 @@ tr.prow-ok td:first-child,tr.prow-inc td:first-child,tr.prow-dead td:first-child
 .training-callout p{line-height:1.5}
 .tr-reveal .na-btn,.tr-reveal .qflag{opacity:1}
 @media (hover:none){.na-btn{opacity:.8}.qflag{opacity:.6}}
+.training-callout button{touch-action:manipulation}
 .training-toc{max-height:38vh;overflow:auto;margin:0 0 12px;padding:6px 8px 6px 28px;border:1px solid var(--line);border-radius:10px;font-size:13px}
 .training-toc button{background:none;border:0;padding:3px 0;color:var(--ink);text-align:left;cursor:pointer;font:inherit}
 .training-toc button:hover{color:var(--accent)}
