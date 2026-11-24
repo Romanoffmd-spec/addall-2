@@ -583,7 +583,7 @@ tr.prow-ok td:first-child,tr.prow-inc td:first-child,tr.prow-dead td:first-child
 /* Пошаговый гайд учебного режима */
 .training-guide{position:fixed;inset:0;z-index:1200;pointer-events:none}
 .training-spot{position:fixed;border:2px solid var(--accent);border-radius:12px;box-shadow:0 0 0 200vmax rgba(12,18,32,.48)}
-.training-callout{position:fixed;width:min(350px,calc(100vw - 24px));max-height:calc(100vh - 24px);padding:17px 19px;border:1px solid var(--accent-line);border-radius:14px;background:var(--surface);color:var(--ink);box-shadow:var(--sh3);pointer-events:auto}
+.training-callout{position:fixed;width:min(410px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;padding:17px 19px;border:1px solid var(--accent-line);border-radius:14px;background:var(--surface);color:var(--ink);box-shadow:var(--sh3);pointer-events:auto}
 .training-callout::before{content:"";position:absolute;background:var(--surface);border:solid var(--accent-line);border-width:1px 0 0 1px;width:13px;height:13px;transform:rotate(-45deg)}
 .training-callout[data-side=none]::before{display:none}
 .training-callout[data-side=left]::before{left:-8px;top:calc(var(--guide-arrow) - 7px)}
@@ -595,4 +595,13 @@ tr.prow-ok td:first-child,tr.prow-inc td:first-child,tr.prow-dead td:first-child
 .training-callout-top,.training-callout-actions{display:flex;align-items:center;gap:8px}
 .training-callout-top{justify-content:space-between;color:var(--muted);font-size:12px}
 .training-callout-actions{justify-content:flex-end}
+.training-callout-actions .sp{flex:1}
+.training-callout-top span{line-height:1.35}
+.training-callout p{line-height:1.5}
+.tr-reveal .na-btn,.tr-reveal .qflag{opacity:1}
+@media (hover:none){.na-btn{opacity:.8}.qflag{opacity:.6}}
+.training-toc{max-height:38vh;overflow:auto;margin:0 0 12px;padding:6px 8px 6px 28px;border:1px solid var(--line);border-radius:10px;font-size:13px}
+.training-toc button{background:none;border:0;padding:3px 0;color:var(--ink);text-align:left;cursor:pointer;font:inherit}
+.training-toc button:hover{color:var(--accent)}
+.training-toc button.on{color:var(--accent);font-weight:600}
 @media print{.training-guide{display:none}}
