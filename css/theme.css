@@ -579,3 +579,20 @@ tr.prow-ok td:first-child,tr.prow-inc td:first-child,tr.prow-dead td:first-child
 .mm-case{border-top:1px solid var(--line);padding:14px 0}
 .mm-q{background:var(--surface-2);border-radius:10px;padding:10px 12px;font-size:13px}
 @media print{.mm-case{break-inside:avoid}}
+
+/* Пошаговый гайд учебного режима */
+.training-guide{position:fixed;inset:0;z-index:1200;pointer-events:none}
+.training-spot{position:fixed;border:2px solid var(--accent);border-radius:12px;box-shadow:0 0 0 200vmax rgba(12,18,32,.48)}
+.training-callout{position:fixed;width:min(350px,calc(100vw - 24px));max-height:calc(100vh - 24px);padding:17px 19px;border:1px solid var(--accent-line);border-radius:14px;background:var(--surface);color:var(--ink);box-shadow:var(--sh3);pointer-events:auto}
+.training-callout::before{content:"";position:absolute;background:var(--surface);border:solid var(--accent-line);border-width:1px 0 0 1px;width:13px;height:13px;transform:rotate(-45deg)}
+.training-callout[data-side=none]::before{display:none}
+.training-callout[data-side=left]::before{left:-8px;top:calc(var(--guide-arrow) - 7px)}
+.training-callout[data-side=right]::before{right:-8px;top:calc(var(--guide-arrow) - 7px);transform:rotate(135deg)}
+.training-callout[data-side=top]::before{top:-8px;left:calc(var(--guide-arrow) - 7px);transform:rotate(45deg)}
+.training-callout[data-side=bottom]::before{bottom:-8px;left:calc(var(--guide-arrow) - 7px);transform:rotate(225deg)}
+.training-callout h2{font-size:20px;margin:9px 0 5px}
+.training-callout p{margin:0 0 14px}
+.training-callout-top,.training-callout-actions{display:flex;align-items:center;gap:8px}
+.training-callout-top{justify-content:space-between;color:var(--muted);font-size:12px}
+.training-callout-actions{justify-content:flex-end}
+@media print{.training-guide{display:none}}
