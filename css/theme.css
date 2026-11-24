@@ -606,3 +606,7 @@ tr.prow-ok td:first-child,tr.prow-inc td:first-child,tr.prow-dead td:first-child
 .training-toc button:hover{color:var(--accent)}
 .training-toc button.on{color:var(--accent);font-weight:600}
 @media print{.training-guide{display:none}}
+
+/* iPad и iPhone: высота оболочки по видимой области, без прокрутки всей страницы под панелью Safari */
+@supports (height:100dvh){body.shell,body.shell.aa-sb{height:100dvh}}
+html:has(> body.shell){overflow:hidden;overscroll-behavior:none}
