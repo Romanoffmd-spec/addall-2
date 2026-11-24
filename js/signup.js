@@ -29,7 +29,7 @@ Pages.login = async function (mode = 'login') {
   document.body.className = '';
   const selfReg = Settings.data.selfReg !== false;
   if (!selfReg && mode === 'reg') mode = 'login';
-  const head = `<div class="auth-brand"><img src="media/addall-icon.svg" alt=""><b>Add<i>All</i> 2.0</b></div><p class="muted">${esc([Settings.data.center, Settings.data.department].filter(Boolean).join(' ') || 'Платформа регистров')}</p>`;
+  const head = `<div class="auth-brand"><img src="media/addall-emblem.svg" alt=""><b>Add<i>All</i> 2.0</b></div><p class="muted">${esc([Settings.data.center, Settings.data.department].filter(Boolean).join(' ') || 'Платформа регистров')}</p>`;
   const tabs = selfReg ? `<div class="aseg"><button class="${mode === 'login' ? 'on' : ''}" data-am="login">Вход</button><button class="${mode === 'reg' ? 'on' : ''}" data-am="reg">Регистрация</button></div>` : '';
   let body = '';
   if (mode === 'wait') {

@@ -5,7 +5,7 @@ const Pages = {
   setup() {
     document.body.className = '';
     document.body.innerHTML = `<div class="auth"><div class="auth-box wide">
-      <div class="auth-brand"><img src="media/addall-icon.svg" alt=""><b>Add<i>All</i> 2.0</b></div><p class="muted">Первый запуск. Создайте администратора платформы. ${typeof NET !== 'undefined' && NET.on ? 'Данные хранятся в общей базе на сервере.' : 'Данные хранятся только в этом браузере на этом компьютере.'}</p>
+      <div class="auth-brand"><img src="media/addall-emblem.svg" alt=""><b>Add<i>All</i> 2.0</b></div><p class="muted">Первый запуск. Создайте администратора платформы. ${typeof NET !== 'undefined' && NET.on ? 'Данные хранятся в общей базе на сервере.' : 'Данные хранятся только в этом браузере на этом компьютере.'}</p>
       <div class="grid">
         <div class="fld"><label class="flab">Учреждение</label><input class="inp" id="s_center" placeholder="Например: ННОЦ, Астана"></div>
         <div class="fld"><label class="flab">Отделение / сектор</label><input class="inp" id="s_dep"></div>
@@ -34,7 +34,7 @@ const Pages = {
   login() {
     document.body.className = '';
     document.body.innerHTML = `<div class="auth"><div class="auth-box">
-      <div class="auth-brand"><img src="media/addall-icon.svg" alt=""><b>Add<i>All</i> 2.0</b></div><p class="muted">${esc(Settings.data.center || '')} ${esc(Settings.data.department || '')}</p>
+      <div class="auth-brand"><img src="media/addall-emblem.svg" alt=""><b>Add<i>All</i> 2.0</b></div><p class="muted">${esc(Settings.data.center || '')} ${esc(Settings.data.department || '')}</p>
       <div class="fld"><label class="flab">Логин</label><input class="inp" id="l_login" autofocus></div>
       <div class="fld"><label class="flab">Пароль</label><input class="inp" type="password" id="l_pass"></div>
       <button class="btn primary block" id="l_go">Войти</button></div></div>`;
