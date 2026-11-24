@@ -610,3 +610,9 @@ tr.prow-ok td:first-child,tr.prow-inc td:first-child,tr.prow-dead td:first-child
 /* iPad и iPhone: высота оболочки по видимой области, без прокрутки всей страницы под панелью Safari */
 @supports (height:100dvh){body.shell,body.shell.aa-sb{height:100dvh}}
 html:has(> body.shell){overflow:hidden;overscroll-behavior:none}
+
+/* отчётный период */
+.pr-checks{list-style:none;padding:0;margin:8px 0}
+.pr-checks li{padding:6px 10px;border-radius:8px;margin:4px 0;background:var(--surface-2)}
+.pr-checks li.okt{color:var(--ok, #1a7f45)}
+.pr-checks li.warnt{color:var(--warn-ink, #9a5b00)}
