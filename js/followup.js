@@ -37,7 +37,7 @@ Routes.followup = async (main, regId = '') => {
       <div class="tile"><b>${count('done')}</b><span>выполнено</span></div></div>
     <div class="tabs" role="tablist">${[['todo', 'Нужно сделать'], ['soon', 'Скоро'], ['reason', 'С причиной'], ['done', 'Выполнено'], ['all', 'Все']].map(([k, t]) => `<a href="javascript:void 0" data-fq="${k}" class="${st.tab === k ? 'on' : ''}" role="tab" aria-selected="${st.tab === k}">${t} <span class="muted">${count(k)}</span></a>`).join('')}</div>
     <div id="fqList"></div>
-    <p class="muted small">Правила: ${rules.map(et => { const r = Episodes.rule(et); return `«${esc(et.name)}» через ${r.days} дней${r.every ? `, затем каждые ${r.every} дней` : ''}${r.window ? `, окно ${r.window} дней` : ''}`; }).join('; ')}. Меняются в конструкторе: Формы событий, «Настроить».</p>`
+    <p class="muted small">Правила: ${rules.map(et => { const r = Episodes.rule(et); return `«${esc(et.name)}» ${r.mode === 'by' ? 'к' : 'на'} ${r.days}-й день${r.every ? `, затем каждые ${r.every} дней` : ''}${r.mode === 'at' ? `; засчитывается запись не раньше чем за ${r.early} дн. до срока` : ''}${r.window ? `, заполнять можно ещё ${r.window} дн. после срока` : ''}`; }).join('; ')}. Меняются в конструкторе: Формы событий, «Настроить».</p>`
     : `<div class="card">${emptyState('В этом регистре ни одна форма не отмечена как ожидаемая. Откройте конструктор, вкладка «Формы событий», кнопка «Настроить» у нужной формы, и укажите, через сколько дней она ожидается в каждом эпизоде.')}<div class="row"><a class="btn" href="#registry/${esc(reg.id)}/events">Открыть конструктор</a></div></div>`}`;
   $('#fqReg', main).onchange = e => go('followup/' + e.target.value);
   if (!rules.length) return;
@@ -59,7 +59,7 @@ Routes.followup = async (main, regId = '') => {
     $$('[data-fill], [data-open]', $('#fqList', main)).forEach(b => b.onclick = () => {
       const x = rows[+(b.dataset.fill ?? b.dataset.open)];
       const p = pById.get(x.ep.patientId);
-      eventDialog(p, reg, x.event || { type: x.et.id, ...(x.ep.patient ? {} : { anchorEventId: x.ep.id }) });
+      eventDialog(p, reg, x.event || { type: x.et.id, followDue: x.due, ...(x.ep.patient ? {} : { anchorEventId: x.ep.id }) });
     });
     $$('[data-why]', $('#fqList', main)).forEach(b => b.onclick = () => {
       const x = rows[+b.dataset.why];
@@ -85,6 +85,12 @@ Routes.followup = async (main, regId = '') => {
 };
 
 ROUTE_GROUP.followup = 'Работа';
+/* причины по задачам нужны и в показателях качества (evalIndicator синхронный): держим их копию перед каждой отрисовкой */
+FollowQ.refresh = async () => { try { FollowQ.cache = await DB.all('tasks'); } catch (error) { FollowQ.cache = FollowQ.cache || []; } };
+{
+  const route = App.route.bind(App);
+  App.route = async function (...args) { await FollowQ.refresh(); return route(...args); };
+}
 NAV_ICONS.followup = NAV_ICONS.out30 || NAV_ICONS.me;
 {
   const previous = navGroups;

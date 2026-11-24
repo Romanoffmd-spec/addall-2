@@ -18,9 +18,19 @@ const Episodes = {
   list(reg, events, patients) {
     const own = events.filter(e => !e.registryId || e.registryId === reg.id);
     if (this.isPatient(reg)) {
+      /* отсчёт от выбранной формы (например, «Включение»); если её у пациента ещё нет, от первой записи */
+      const anchorType = etById(reg, reg.episode?.anchorForm) ? reg.episode.anchorForm : '';
       const first = new Map();
+      if (anchorType) {
+        for (const e of own) {
+          if (e.type !== anchorType || !e.date || e.status === 'черновик') continue;
+          const was = first.get(e.patientId);
+          if (!was || e.date < was.date) first.set(e.patientId, { id: 'pt:' + e.patientId, patientId: e.patientId, date: e.date, patient: true, anchorEventId: e.id, ownerId: e.ownerId || e.createdBy });
+        }
+      }
       for (const e of own) {
         if (!e.date || e.status === 'черновик') continue;
+        if (anchorType && first.get(e.patientId)?.anchorEventId) continue;
         const was = first.get(e.patientId);
         if (!was || e.date < was.date) first.set(e.patientId, { id: 'pt:' + e.patientId, patientId: e.patientId, date: e.date, patient: true, ownerId: e.ownerId || e.createdBy });
       }
@@ -67,14 +77,20 @@ const Episodes = {
     }
     return out;
   },
-  /* правило ожидания формы: первый срок через days после начала эпизода, дальше каждые every дней (если задано),
-     допустимое окно window дней после срока (по умолчанию половина интервала, для однократной формы 0) */
+  /* правило ожидания формы: первый срок через days после начала эпизода, дальше каждые every дней (если задано).
+     window: сколько дней после срока ещё можно заполнять (по умолчанию 0, у повторяющихся половина интервала).
+     early: на сколько дней раньше срока запись ещё засчитывается (по умолчанию 0, у повторяющихся половина интервала).
+     Запись раньше срока минус early за этот срок не засчитывается: исход на 90-й день нельзя подтвердить при выписке. */
   rule(et) {
     const x = et?.expect;
     if (!x || x.days === '' || x.days == null || !Number.isFinite(Number(x.days))) return null;
     const every = Number(x.every) > 0 ? Math.round(Number(x.every)) : 0;
     const window = x.window !== '' && x.window != null && Number(x.window) >= 0 ? Math.round(Number(x.window)) : (every ? Math.round(every / 2) : 0);
-    return { days: Math.max(0, Math.round(Number(x.days))), every, window };
+    const days = Math.max(0, Math.round(Number(x.days)));
+    /* mode 'by': форма нужна к сроку (патоморфология к 30-му дню), засчитывается любая запись с начала эпизода;
+       mode 'at' (по умолчанию): оценка на срок (исход на 90-й день), раньше срока не засчитывается */
+    const early = x.early !== '' && x.early != null && Number(x.early) >= 0 ? Math.round(Number(x.early)) : x.mode === 'by' ? days : (every ? Math.round(every / 2) : 0);
+    return { days, every, window, early, mode: x.mode === 'by' ? 'by' : 'at' };
   },
   expected(reg) {
     const opener = this.opener(reg);
@@ -111,12 +127,26 @@ const FollowQ = {
       for (const ep of episodes) {
         const list = (byEpisode.get(ep.id) || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
         const used = new Set();
+        const dues = [];
         for (let k = 0; k < 400; k++) {
           const due = addDays(ep.date, rule.days + k * rule.every);
           /* повторяющиеся сроки показываем только до горизонта; однократный срок показываем всегда */
           if (rule.every && due > horizon) break;
-          const reach = rule.every ? Math.max(rule.window, Math.floor(rule.every / 2)) : Infinity;
-          const match = list.find(e => !used.has(e.id) && Math.abs(daysBetween(due, e.date || due)) <= reach) || null;
+          dues.push(due);
+          if (!rule.every) break;
+        }
+        /* привязка к сроку, которого больше нет (например, исправили дату начала), не теряет запись: она подбирается по дате */
+        const linked = e => e.followDue && dues.includes(e.followDue);
+        for (let k = 0; k < dues.length; k++) {
+          const due = dues[k];
+          /* сначала запись, явно привязанная к этому сроку (заполнена из очереди), затем подходящая по дате */
+          const fits = e => {
+            if (used.has(e.id) || !e.date) return false;
+            const d = daysBetween(due, e.date);
+            if (d < -rule.early) return false;
+            return rule.every ? d <= Math.max(rule.window, Math.ceil(rule.every / 2) - 1) : true;
+          };
+          const match = list.find(e => !used.has(e.id) && e.followDue === due) || list.find(e => !linked(e) && fits(e)) || null;
           if (match) used.add(match.id);
           const mark = marks.get(this.key(ep.id, et.id, due));
           let state;
@@ -128,7 +158,6 @@ const FollowQ = {
           else if (daysBetween(due, t0) <= rule.window) state = 'open';
           else state = 'overdue';
           out.push({ reg, ep, et, k, due, state, event: match, mark, late: Math.max(0, daysBetween(addDays(due, rule.window), t0)) });
-          if (!rule.every) break;
         }
       }
     }

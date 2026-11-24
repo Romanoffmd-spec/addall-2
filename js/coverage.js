@@ -69,6 +69,7 @@ Routes.coverage = async (main, regId = '') => {
         </form>` : ''}
     </div>
     <div class="card"><h2>Полнота наблюдения за период</h2><div id="covFollow"></div></div>
+    <div class="card" id="rcCard"></div>
     <div class="card"><h2>История сверок</h2><div id="covHistory"></div></div>`;
   $('#covReg', main).onchange = e => go('coverage/' + e.target.value);
 
@@ -98,6 +99,7 @@ Routes.coverage = async (main, regId = '') => {
       ? `В регистре: ${observed}. ${Coverage.estimate(observed, latest?.expected)}`
       : 'Выберите событие и проверьте границы периода.';
     renderFollow();
+    if (valid()) Recon.render($('#rcCard', main), reg, patients, events, filter, canSave);
     $('#covHistory', main).innerHTML = list.length ? `<table class="tbl"><thead><tr><th>Дата сверки</th><th>В источнике</th><th>Источник и отбор</th></tr></thead><tbody>
       ${list.map(item => `<tr><td>${fmtDT(item.createdAt)}</td><td>${esc(item.expected)}</td><td>${esc(item.source)}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">За выбранный период сверок пока нет.</p>';

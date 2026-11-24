@@ -684,10 +684,11 @@ function scoreInstrument(ins, answers) {
 /* оценка показателя качества */
 function evalIndicator(ind, events, patients, reg) {
   const et = reg.eventTypes.find(e => e.id === ind.et);
-  let den = 0, num = 0, miss = 0, naN = 0, noForm = 0; const denIds = [], numIds = [], missIds = [];
+  let den = 0, num = 0, naN = 0, noForm = 0; const denIds = [], numIds = [], missIds = [], reasonIds = [];
   const patientById = new Map(patients.filter(p => !p.registryId || p.registryId === reg.id).map(p => [p.id, p]));
-  const markMissing = e => { miss++; missIds.push(e.id); };
-  events.filter(e => e.type === ind.et && (!e.registryId || e.registryId === reg.id)).forEach(e => {
+  const markMissing = e => { missIds.push(e.id); };
+  /* оценка одной записи: в знаменатель, в числитель, пропуск или «не применимо» */
+  const judge = e => {
     const p = patientById.get(e.patientId);
     if (!p) return;
     const v = computeValues(reg, p, et, e.data, e.date);
@@ -708,24 +709,28 @@ function evalIndicator(ind, events, patients, reg) {
       if (!na) { markMissing(e); return; }
     }
     den++; denIds.push(e.id); if (condOK(ind.num, v)) { num++; numIds.push(e.id); }
-  });
-  /* эпизоды, у которых ожидаемой формы нет совсем: исход неизвестен, случай виден как пропуск, а не теряется */
-  const rule = typeof Episodes === 'object' && Episodes.rule(et);
+  };
+  const rule = typeof Episodes === 'object' && typeof FollowQ === 'object' && Episodes.rule(et);
   if (rule && ind.et !== Episodes.opener(reg)) {
+    /* форма со сроком: расчёт идёт по тем же срокам, что очередь наблюдения и охват.
+       Выполненный срок оценивается по своей записи; просроченный срок без записи это пропуск («исход неизвестен»);
+       срок с причиной это тоже неизвестный исход, но с объяснением; «не применимо» исключается; срок, который не наступил, не считается. */
     const regEvents = events.filter(e => !e.registryId || e.registryId === reg.id);
-    const link = Episodes.link(reg, regEvents);
-    const covered = new Set(regEvents.filter(e => e.type === ind.et).map(e => link.get(e.id)).filter(Boolean));
-    const t0 = today();
-    for (const ep of Episodes.list(reg, regEvents)) {
-      if (!covered.has(ep.id) && patientById.has(ep.patientId) && addDays(ep.date, rule.days + rule.window) <= t0) {
-        /* у продольного регистра эпизод это пациент: в список пропусков идёт его первая запись */
-        const first = ep.patient ? regEvents.find(e => e.patientId === ep.patientId && e.date === ep.date) : ep;
-        if (first) { markMissing(first); noForm++; }
-      }
+    const items = FollowQ.build(reg, regEvents, patients, FollowQ.cache || []);
+    const stand = x => x.event || (x.ep.patient ? regEvents.find(e => e.id === x.ep.anchorEventId) || regEvents.find(e => e.patientId === x.ep.patientId && e.date === x.ep.date) : x.ep);
+    for (const x of items) {
+      if (!patientById.has(x.ep.patientId)) continue;
+      if (x.state === 'done') judge(x.event);
+      else if (x.state === 'na') naN++;
+      else if (x.state === 'reason') { const e = stand(x); if (e) reasonIds.push(e.id); }
+      else if (x.state === 'overdue' || x.state === 'partial') { const e = stand(x); if (e) { markMissing(e); if (!x.event) noForm++; } }
     }
+  } else {
+    events.filter(e => e.type === ind.et && (!e.registryId || e.registryId === reg.id)).forEach(judge);
   }
-  const r = { den, num, miss, na: naN, noForm, pct: den ? Math.round(num / den * 1000) / 10 : null };
+  const miss = missIds.length + reasonIds.length;
+  const r = { den, num, miss, na: naN, noForm, reason: reasonIds.length, pct: den ? Math.round(num / den * 1000) / 10 : null };
   /* списки событий для перехода к пациентам; неперечисляемые, чтобы не попадать в контекст ИИ */
-  Object.defineProperties(r, { denIds: { value: denIds }, numIds: { value: numIds }, missIds: { value: missIds } });
+  Object.defineProperties(r, { denIds: { value: denIds }, numIds: { value: numIds }, missIds: { value: missIds }, reasonIds: { value: reasonIds } });
   return r;
 }
