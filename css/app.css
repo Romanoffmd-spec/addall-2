@@ -200,7 +200,7 @@ fieldset.sec legend{font-weight:600;padding:0 6px;font-size:15px}
 .auth{flex:1;display:flex;align-items:center;justify-content:center;min-height:100vh;position:relative;isolation:isolate;padding:20px}
 .auth:before{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(100deg,rgba(14,21,70,.94),rgba(31,47,132,.6)),url(../media/nroc-hero-hd.webp) center/cover}
 .auth-box{background:var(--surface);border-radius:var(--r-xl);padding:30px 32px;width:400px;box-shadow:var(--sh3)}.auth-box.wide{width:780px}
-.auth-brand{display:flex;align-items:center;gap:12px;margin-bottom:6px}.auth-brand img{height:42px}.auth-brand b{font:700 26px var(--f-disp)}.auth-brand b i{font-style:normal;color:var(--navy)}
+.auth-brand{display:flex;align-items:center;gap:12px;margin-bottom:6px}.auth-brand img{height:54px;border-radius:13px}.auth-brand b{font:700 26px var(--f-disp)}.auth-brand b i{font-style:normal;color:var(--navy)}
 /* ---------- аналитика, прочее ---------- */
 .an{display:grid;grid-template-columns:340px 1fr;gap:14px}@media(max-width:1100px){.an{grid-template-columns:1fr}}
 .an-cfg .inp{margin-bottom:6px}.an-cfg .row .inp{width:auto;flex:1}.cond{display:grid;grid-template-columns:1fr 1fr;gap:4px;border:1px solid var(--line);border-radius:6px;padding:6px;margin-bottom:6px}
