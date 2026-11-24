@@ -100,8 +100,8 @@ function parseCSV(text) {
 }
 
 /* ---------- хранилище (IndexedDB) ---------- */
-const DB_VERSION = 4;
-const STORES = ['users', 'registries', 'patients', 'events', 'mdt', 'proms', 'audit', 'settings', 'saved', 'queries', 'trials', 'alloc', 'screening', 'journals', 'jrecs', 'files', 'comments', 'refs', 'docs', 'doctpl', 'coverage'];
+const DB_VERSION = 5;
+const STORES = ['users', 'registries', 'patients', 'events', 'mdt', 'proms', 'audit', 'settings', 'saved', 'queries', 'trials', 'alloc', 'screening', 'journals', 'jrecs', 'files', 'comments', 'refs', 'docs', 'doctpl', 'coverage', 'tasks'];
 /* учебный режим: отдельная база-песочница с вымышленными пациентами */
 const TRAIN = (() => { try { return localStorage.getItem('addall2.mode') === 'train'; } catch (e) { return false; } })();
 const DB = {

@@ -710,13 +710,18 @@ function evalIndicator(ind, events, patients, reg) {
     den++; denIds.push(e.id); if (condOK(ind.num, v)) { num++; numIds.push(e.id); }
   });
   /* эпизоды, у которых ожидаемой формы нет совсем: исход неизвестен, случай виден как пропуск, а не теряется */
-  if (typeof Episodes === 'object' && et?.expect && Number.isFinite(Number(et.expect.days)) && ind.et !== Episodes.opener(reg)) {
+  const rule = typeof Episodes === 'object' && Episodes.rule(et);
+  if (rule && ind.et !== Episodes.opener(reg)) {
     const regEvents = events.filter(e => !e.registryId || e.registryId === reg.id);
     const link = Episodes.link(reg, regEvents);
     const covered = new Set(regEvents.filter(e => e.type === ind.et).map(e => link.get(e.id)).filter(Boolean));
     const t0 = today();
     for (const ep of Episodes.list(reg, regEvents)) {
-      if (!covered.has(ep.id) && patientById.has(ep.patientId) && addDays(ep.date, Number(et.expect.days)) <= t0) { markMissing(ep); noForm++; }
+      if (!covered.has(ep.id) && patientById.has(ep.patientId) && addDays(ep.date, rule.days + rule.window) <= t0) {
+        /* у продольного регистра эпизод это пациент: в список пропусков идёт его первая запись */
+        const first = ep.patient ? regEvents.find(e => e.patientId === ep.patientId && e.date === ep.date) : ep;
+        if (first) { markMissing(first); noForm++; }
+      }
     }
   }
   const r = { den, num, miss, na: naN, noForm, pct: den ? Math.round(num / den * 1000) / 10 : null };

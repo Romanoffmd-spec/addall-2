@@ -5,8 +5,9 @@ const Coverage = {
   /* эпизоды (случаи) за период: каждое сохранённое событие выбранного типа; два события одного пациента это два эпизода */
   episodes(reg, patients, events, filter) {
     const people = new Set(patients.filter(p => p.registryId === reg.id && (!filter.center || p.center === filter.center)).map(p => p.id));
-    return events.filter(event => event.registryId === reg.id && event.type === filter.eventType && event.status !== 'черновик'
-      && event.date >= filter.from && event.date <= filter.to && people.has(event.patientId));
+    const inPeriod = e => e.date >= filter.from && e.date <= filter.to && people.has(e.patientId);
+    if (filter.eventType === Episodes.PATIENT) return Episodes.list(reg, events, patients).filter(inPeriod);
+    return events.filter(event => event.registryId === reg.id && event.type === filter.eventType && event.status !== 'черновик' && inPeriod(event));
   },
   registered(reg, patients, events, filter) { return this.episodes(reg, patients, events, filter).length; },
   /* полнота наблюдения по тем же эпизодам: исход 30 дней и формы, ожидаемые в каждом эпизоде */
@@ -18,10 +19,12 @@ const Coverage = {
       const rows = (await Out30.build()).filter(x => x.reg.id === reg.id && ids.has(x.e.id));
       const n = k => rows.filter(x => x.state === k).length;
       const due = n('done') + n('due') + n('partial');
-      lines.push({ name: 'Исход 30 дней', done: n('done'), due, missing: n('due'), partial: n('partial'), wait: n('wait'), link: '#out30' });
+      lines.push({ name: 'Исход 30 дней', done: n('done'), due, missing: n('due'), partial: n('partial'), wait: n('wait'), reason: 0, link: '#out30' });
     }
     if (filter.eventType === Episodes.opener(reg)) {
-      for (const x of Episodes.completeness(reg, events, episodes)) lines.push({ name: x.et.name, done: x.done, due: x.due, missing: x.missing, partial: 0, wait: x.wait });
+      const tasks = await DB.all('tasks');
+      const items = FollowQ.build(reg, events, patients, tasks, { episodes });
+      for (const x of FollowQ.summary(items)) lines.push({ name: x.et.name + (Episodes.rule(x.et).every ? ' (все сроки)' : ''), done: x.done, due: x.due, missing: x.missing, partial: x.partial, wait: x.wait, reason: x.reason, link: '#followup/' + reg.id });
     }
     return { total: episodes.length, lines };
   },
@@ -41,7 +44,8 @@ Routes.coverage = async (main, regId = '') => {
   const screens = (Routes.coverage.filters ||= {});
   const filter = screens[reg.id] ||= { from: today().slice(0, 4) + '-01-01', to: today(), eventType: Episodes.opener(reg) || '', center: '' };
   const types = reg.eventTypes || [];
-  if (!types.some(type => type.id === filter.eventType)) filter.eventType = types[0]?.id || '';
+  if (filter.eventType !== Episodes.PATIENT && !types.some(type => type.id === filter.eventType)) filter.eventType = types[0]?.id || '';
+  if (filter.eventType === Episodes.PATIENT && !Episodes.isPatient(reg)) filter.eventType = Episodes.opener(reg);
   const history = stored.filter(x => x.registryId === reg.id);
   const orgs = [...new Set([...(Settings.data.centers || []), ...patients.map(p => p.center), ...history.map(item => item.center)].filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const canSave = can('users') || (can('design') && regManage(reg));
@@ -53,7 +57,7 @@ Routes.coverage = async (main, regId = '') => {
         <div class="fld"><label class="flab" for="covFrom">Начало периода</label><input class="inp" id="covFrom" type="date" value="${esc(filter.from)}"></div>
         <div class="fld"><label class="flab" for="covTo">Конец периода</label><input class="inp" id="covTo" type="date" value="${esc(filter.to)}"></div>
         <div class="fld"><label class="flab" for="covOrg">Учреждение в карточке пациента</label><select class="inp" id="covOrg"><option value="">Все учреждения</option>${orgs.map(name => `<option value="${esc(name)}" ${name === filter.center ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></div>
-        <div class="fld"><label class="flab" for="covType">Единица учёта: эпизод открывается событием</label><select class="inp" id="covType">${types.map(type => `<option value="${esc(type.id)}" ${type.id === filter.eventType ? 'selected' : ''}>${esc(type.name)}${type.id === Episodes.opener(reg) ? ' (эпизод регистра)' : ''}</option>`).join('')}</select></div>
+        <div class="fld"><label class="flab" for="covType">Единица учёта: эпизод открывается событием</label><select class="inp" id="covType">${Episodes.isPatient(reg) ? `<option value="${Episodes.PATIENT}" ${filter.eventType === Episodes.PATIENT ? 'selected' : ''}>Пациент целиком (эпизод регистра)</option>` : ''}${types.map(type => `<option value="${esc(type.id)}" ${type.id === filter.eventType ? 'selected' : ''}>${esc(type.name)}${type.id === Episodes.opener(reg) ? ' (эпизод регистра)' : ''}</option>`).join('')}</select></div>
       </div>
       <p class="muted">Каждое сохранённое событие выбранного типа это отдельный случай: две операции у одного пациента дают два случая. Черновики пропускаются. Те же случаи используются для полноты наблюдения ниже и для показателей качества.</p>
       <p id="covResult" aria-live="polite"></p>
@@ -82,7 +86,7 @@ Routes.coverage = async (main, regId = '') => {
     box.innerHTML = !f.lines.length
       ? `<p class="muted">Для этого события нет ожидаемых форм. Укажите в конструкторе (Формы событий, «Настроить»), какие формы ожидаются в каждом эпизоде и через сколько дней, например патоморфология через 30 дней.</p>`
       : `<p>Случаев за период: <b>${f.total}</b>.</p><table class="tbl"><thead><tr><th>Что ожидается</th><th>Есть</th><th>Нет, срок наступил</th><th>Срок не наступил</th></tr></thead><tbody>
-        ${f.lines.map(x => `<tr><td>${x.link ? `<a href="${x.link}">${esc(x.name)}</a>` : esc(x.name)}</td><td><b>${x.done}</b> из ${x.due}${pct(x.done, x.due)}</td><td>${x.missing}${x.partial ? ` + ${x.partial} заполнено не полностью` : ''}</td><td>${x.wait}</td></tr>`).join('')}</tbody></table>
+        ${f.lines.map(x => `<tr><td>${x.link ? `<a href="${x.link}">${esc(x.name)}</a>` : esc(x.name)}</td><td><b>${x.done}</b> из ${x.due}${pct(x.done, x.due)}</td><td>${x.missing}${x.partial ? ` + ${x.partial} заполнено не полностью` : ''}${x.reason ? ` · ${x.reason} закрыто с причиной` : ''}</td><td>${x.wait}</td></tr>`).join('')}</tbody></table>
         <p class="muted small">Случай без формы не пропадает: он считается как «нет, срок наступил» здесь и как «исход неизвестен» в показателях качества.</p>`;
   };
   const renderResult = () => {

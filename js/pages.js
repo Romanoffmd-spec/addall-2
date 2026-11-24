@@ -188,7 +188,7 @@ Routes.registry = async (main, id, tab = 'general') => {
       <div class="fld wide"><label class="flab">Описание, критерии включения</label><textarea class="inp" id="g_desc" rows="3" ${ro ? 'disabled' : ''}>${esc(reg.description || '')}</textarea></div>
       <div class="fld"><label class="flab">Статус</label><select class="inp" id="g_status" ${ro ? 'disabled' : ''}>${['черновик', 'пилот', 'активный', 'закрыт'].map(s => `<option ${reg.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
       <div class="fld"><label class="flab">Наблюдение каждые (дней), 0 = не напоминать</label><input class="inp" type="number" id="g_fu" value="${reg.followupEvery || 0}" ${ro ? 'disabled' : ''}></div>
-      <div class="fld wide"><label class="flab">Единица учёта: эпизод открывается событием</label><select class="inp" id="g_ep" ${ro ? 'disabled' : ''}>${reg.eventTypes.map(e => `<option value="${e.id}" ${Episodes.opener(reg) === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select><span class="fhint">Что регистр считает одним случаем. Хирургический аудит: операция. Регистр заболевания: диагноз. Кардиология: госпитализация. Остальные события пациента относятся к эпизоду по дате или по выбору в форме. Охват, полнота наблюдения и показатели качества считаются по эпизодам.</span></div>
+      <div class="fld wide"><label class="flab">Единица учёта: эпизод открывается событием</label><select class="inp" id="g_ep" ${ro ? 'disabled' : ''}>${reg.eventTypes.map(e => `<option value="${e.id}" ${Episodes.opener(reg) === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}<option value="${Episodes.PATIENT}" ${Episodes.isPatient(reg) ? 'selected' : ''}>Пациент целиком (продольный регистр)</option></select><span class="fhint">Что регистр считает одним случаем. Хирургический аудит: операция. Регистр заболевания: диагноз. Кардиология: госпитализация. Продольный регистр (например, диабет): пациент целиком, отсчёт от первой записи. Остальные события пациента относятся к эпизоду по дате или по выбору в форме. Охват, полнота наблюдения и показатели качества считаются по эпизодам.</span></div>
       <div class="fld"><label class="flab">Событие-точка отсчёта для выживаемости</label><select class="inp" id="g_start" ${ro ? 'disabled' : ''}>${reg.eventTypes.map(e => `<option value="${e.id}" ${reg.keyDates?.start === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>
       <div class="fld"><label class="flab">Версия схемы</label><div class="calc">v${reg.version}</div></div>
     </div></div>
@@ -288,9 +288,15 @@ function etDialog(et, done) {
     <div class="fld"><label class="flab">Подпись поля даты</label><input class="inp" id="e_d" value="${esc(et.dateLabel || 'Дата')}"></div>
     <div class="fld"><label class="flab">Цвет на таймлайне</label><input class="inp" type="color" id="e_c" value="${esc(et.color || '#888888')}"></div>
     <div class="fld"><label class="flab">Однократное событие</label><select class="inp" id="e_s"><option value="0">нет, может повторяться</option><option value="1" ${et.single ? 'selected' : ''}>да, одно на пациента</option></select></div>
-    <div class="fld"><label class="flab">Ожидается в каждом эпизоде через (дней)</label><input class="inp" type="number" min="0" step="1" id="e_x" value="${et.expect && Number.isFinite(Number(et.expect.days)) ? esc(et.expect.days) : ''}" placeholder="пусто: не обязательно"><span class="fhint">Например, патоморфология через 30 дней после операции. Если срок прошёл, а формы нет, случай виден как пропуск в охвате и показателях.</span></div>
+    </div>
+    <h4 style="margin:14px 0 4px">Ожидание в каждом эпизоде</h4>
+    <p class="muted small" style="margin:0 0 8px">Если задать срок, форма попадёт в очередь наблюдения. Пример: патоморфология через 30 дней после операции; исход через 90 дней после инсульта; визит каждые 90 дней в регистре диабета. Если срок и окно прошли, а формы нет, случай виден как пропуск в охвате, очереди и показателях.</p>
+    <div class="grid">
+    <div class="fld"><label class="flab" for="e_x">Первый срок через (дней от начала эпизода)</label><input class="inp" type="number" min="0" step="1" id="e_x" value="${et.expect && et.expect.days !== '' && et.expect.days != null ? esc(et.expect.days) : ''}" placeholder="пусто: не ожидается"></div>
+    <div class="fld"><label class="flab" for="e_xe">Повторять каждые (дней)</label><input class="inp" type="number" min="0" step="1" id="e_xe" value="${et.expect?.every ? esc(et.expect.every) : ''}" placeholder="пусто: один раз"></div>
+    <div class="fld"><label class="flab" for="e_xw">Допустимое окно после срока (дней)</label><input class="inp" type="number" min="0" step="1" id="e_xw" value="${et.expect && et.expect.window !== '' && et.expect.window != null ? esc(et.expect.window) : ''}" placeholder="по умолчанию: 0, у повторяющихся половина интервала"></div>
     </div><div class="row end"><button class="btn primary" id="e_ok">Готово</button></div>`);
-  $('#e_ok', m).onclick = () => { et.name = $('#e_n', m).value; et.dateLabel = $('#e_d', m).value; et.color = $('#e_c', m).value; et.single = $('#e_s', m).value === '1'; const ex = $('#e_x', m).value.trim(); if (ex === '') delete et.expect; else et.expect = { days: Math.max(0, Math.round(Number(ex) || 0)) }; m.close(); done(); };
+  $('#e_ok', m).onclick = () => { et.name = $('#e_n', m).value; et.dateLabel = $('#e_d', m).value; et.color = $('#e_c', m).value; et.single = $('#e_s', m).value === '1'; const ex = $('#e_x', m).value.trim(), xe = $('#e_xe', m).value.trim(), xw = $('#e_xw', m).value.trim(); if (ex === '') delete et.expect; else { et.expect = { days: Math.max(0, Math.round(Number(ex) || 0)) }; if (Number(xe) > 0) et.expect.every = Math.round(Number(xe)); if (xw !== '') et.expect.window = Math.max(0, Math.round(Number(xw) || 0)); } m.close(); done(); };
 }
 
 function fieldDialog(reg, et, field, done, patientLevel) {
@@ -501,7 +507,7 @@ Routes.patient = async (main, id) => {
   if (!visibleP(p)) { main.innerHTML = '<div class="card err">Пациент другого центра: нет доступа.</div>'; return; }
   const [reg, regs, users, allEv, proms, mdts, audit, qs, allocs, trials] = await Promise.all([DB.get('registries', p.registryId), Data.registries(), Data.users(), Data.events(), DB.all('proms'), DB.all('mdt'), DB.all('audit'), DB.all('queries'), DB.all('alloc'), DB.all('trials')]);
   const ev = allEv.filter(e => e.patientId === id).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-  const epList = reg ? Episodes.list(reg, ev) : [];
+  const epList = reg ? Episodes.list(reg, ev, [p]) : [];
   const epLink = epList.length > 1 ? Episodes.link(reg, ev) : new Map();
   const epNo = new Map(epList.map((e, i) => [e.id, i + 1]));
   const pr = proms.filter(x => x.patientId === id).sort((a, b) => a.due.localeCompare(b.due));

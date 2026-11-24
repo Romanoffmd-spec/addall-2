@@ -94,6 +94,13 @@ const TRAINING_CHAPTERS = [
     { t: trCard('Действия'), opt: true, title: 'Действия с регистром', text: '«Экспорт структуры» сохраняет формы в файл, чтобы перенести регистр в другую больницу. «Дублировать» создаёт копию для доработки. «Удалить регистр» удаляет его вместе с данными, поэтому требует подтверждения.' },
     { t: '#rgSave', opt: true, title: 'Сохранить', text: 'Сохраняет изменения конструктора. Каждое сохранение повышает версию схемы, и в отчётах видно, по какой версии собирались данные.' }
   ] },
+  { id: 'followup', name: 'Очередь наблюдения', page: 'followup', go: 'followup', steps: [
+    { t: '#main .head', title: 'Очередь наблюдения', text: 'Общий список того, что нужно получить от пациентов после начала эпизода: исход через 90 дней после инсульта, патоморфология через 30 дней после операции, визит каждые 90 дней в регистре диабета. Задачи создаются сами из настроек регистра, их не нужно заводить вручную.' },
+    { t: '#main .tiles', opt: true, title: 'Счётчики', text: 'Сколько задач нужно сделать сейчас и сколько из них просрочено, у скольких срок в ближайшие 30 дней, сколько закрыто с причиной и сколько выполнено.' },
+    { t: '#main .tabs', opt: true, title: 'Вкладки', text: '«Нужно сделать»: срок наступил, формы нет или только черновик. «Скоро»: срок в ближайшие 30 дней. «С причиной»: связаться не удалось, пациент отказался или наблюдается в другом центре. «Выполнено»: форма заполнена.' },
+    { t: '#main [data-why], #main [data-fill], #fqList', opt: true, title: 'Заполнить или указать причину', text: '«Заполнить» открывает нужную форму, уже привязанную к эпизоду. «Причина» закрывает задачу, если исход получить нельзя. Случай с причиной остаётся с неизвестным исходом, но видно почему; «не применимо» исключает задачу из расчёта полноты.' },
+    { t: '#main .card .btn[href*="/events"], #main p.muted.small', opt: true, title: 'Откуда берутся задачи', text: 'Правила задаются в конструкторе: у формы кнопка «Настроить», раздел «Ожидание в каждом эпизоде». Первый срок, повтор и допустимое окно. Так очередь работает для любой специальности без программиста. Лист «Исходы 30 дней» остаётся готовой хирургической настройкой.' }
+  ] },
   { id: 'out30', name: 'Исходы 30 дней', page: 'out30', go: 'out30', steps: [
     { t: '#main .head', title: 'Зачем этот раздел', text: 'Осложнения и смерть в первые 30 дней после операции это главные показатели хирургического качества. Их часто не вносят, потому что пациент уже выписан. Здесь собраны все операции, по которым 30-дневный исход ещё не подтверждён.' },
     { t: '#main .tabs', title: 'Вкладки', text: '«Нужно заполнить»: 30 дней прошли, исход не внесён. «Срок не наступил»: операция была меньше 30 дней назад. «Заполнено»: исход внесён и проверен. «Все»: полный список.' },
@@ -395,10 +402,33 @@ const TrainingGuide = {
   },
   /* прокрутить так, чтобы цель была видна: высокие блоки к верху, остальные в центр */
   reveal(node) {
+    /* прокручиваем только ближайший прокручиваемый блок (основную область, меню, окно формы), а не всю страницу:
+       на iPad страница из-за панели Safari выше экрана, и её прокрутка сдвигала рамку мимо цели */
     const rect = node.getBoundingClientRect();
-    const tall = rect.height > innerHeight * 0.6;
-    try { node.scrollIntoView({ block: tall ? 'start' : 'center', inline: 'nearest', behavior: 'instant' }); }
-    catch (error) { node.scrollIntoView(tall); }
+    let box = node.parentElement;
+    while (box && box !== document.body && box !== document.documentElement) {
+      const style = getComputedStyle(box);
+      if (/(auto|scroll)/.test(style.overflowY) && box.scrollHeight > box.clientHeight + 1) break;
+      box = box.parentElement;
+    }
+    if (box && box !== document.body && box !== document.documentElement) {
+      const area = box.getBoundingClientRect();
+      const top = Math.max(area.top, 0), bottom = Math.min(area.bottom, innerHeight);
+      const visible = rect.top >= top + 8 && rect.bottom <= bottom - 8;
+      if (!visible) {
+        const tall = rect.height > (bottom - top) * 0.6;
+        const shift = tall ? rect.top - top - 12 : rect.top - top - ((bottom - top) - rect.height) / 2;
+        box.scrollTop += shift;
+      }
+    }
+    this.pinPage();
+  },
+  /* оболочка приложения не должна прокручиваться целиком: возвращаем её на место */
+  pinPage() {
+    if (!document.body.classList.contains('shell')) return;
+    if (window.scrollY || document.documentElement.scrollTop || document.body.scrollTop) {
+      window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0;
+    }
   },
   /* следит за целью каждый кадр: подгрузка данных, анимации и панель Safari сдвигают страницу без события scroll */
   track() {
@@ -409,6 +439,7 @@ const TrainingGuide = {
       if (!this.running || !this.root?.isConnected) { this.tracking = false; return; }
       const step = this.steps[this.index];
       if (step?.t && this.onPage(step) && (!this.target || !this.target.isConnected)) this.target = this.find(step.t);
+      this.pinPage();
       const r = this.target?.isConnected ? this.target.getBoundingClientRect() : null;
       const key = r ? [r.left, r.top, r.width, r.height, innerWidth, innerHeight].map(Math.round).join() : 'none' + innerWidth + innerHeight;
       if (key !== last) {
