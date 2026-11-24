@@ -6,12 +6,58 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const uid = (p = '') => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const RICH_TAGS = new Set('a b blockquote br code del div em h1 h2 h3 h4 h5 h6 hr i li mark ol p pre s small span strike strong sub sup table tbody td th thead tfoot tr u ul'.split(' '));
+const RICH_REMOVE = new Set(['script', 'style', 'iframe', 'object', 'embed', 'template']);
+function safeRichHTML(html) {
+  const template = document.createElement('template');
+  template.innerHTML = String(html || '');
+  const clean = parent => {
+    for (const child of [...parent.children]) {
+      const tag = child.localName;
+      if (child.namespaceURI !== 'http://www.w3.org/1999/xhtml' || RICH_REMOVE.has(tag)) { child.remove(); continue; }
+      clean(child);
+      if (!RICH_TAGS.has(tag)) { child.replaceWith(...child.childNodes); continue; }
+      const classes = [...child.classList].filter(name => ['cite', 'miss', 'muted'].includes(name));
+      const ref = tag === 'span' && classes.includes('cite') ? child.getAttribute('data-ref') : null;
+      const href = tag === 'a' ? child.getAttribute('href') : null;
+      const spans = ['th', 'td'].includes(tag) ? ['colspan', 'rowspan'].map(name => [name, child.getAttribute(name)]) : [];
+      for (const attr of [...child.attributes]) child.removeAttribute(attr.name);
+      if (classes.length) child.className = classes.join(' ');
+      if (ref && /^[A-Za-z0-9_.-]{1,100}$/.test(ref)) {
+        child.setAttribute('data-ref', ref);
+        child.setAttribute('contenteditable', 'false');
+      }
+      if (href && /^(https?:|mailto:)/i.test(href.trim())) {
+        child.setAttribute('href', href.trim());
+        child.setAttribute('rel', 'noopener noreferrer');
+      }
+      for (const [name, value] of spans) if (/^[1-9][0-9]?$/.test(value || '')) child.setAttribute(name, value);
+    }
+  };
+  clean(template.content);
+  return template.innerHTML;
+}
+function bindRichPaste(editor) {
+  editor.addEventListener('paste', event => {
+    const formatted = event.clipboardData?.getData('text/html');
+    if (!formatted) return;
+    event.preventDefault();
+    document.execCommand('insertHTML', false, safeRichHTML(formatted));
+  });
+  editor.addEventListener('drop', event => { event.preventDefault(); });
+}
 const nowISO = () => new Date().toISOString();
-const today = () => new Date().toISOString().slice(0, 10);
-const fmtDate = (d) => { if (!d) return ''; const x = new Date(d); if (isNaN(x)) return esc(d); return x.toLocaleDateString('ru-RU'); };
+const localDateISO = (d) => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+const today = () => localDateISO(new Date());
+const fmtDate = (d) => {
+  if (!d) return '';
+  const x = new Date(d);
+  if (isNaN(x)) return esc(d);
+  return x.toLocaleDateString('ru-RU', /^\d{4}-\d{2}-\d{2}$/.test(d) ? { timeZone: 'UTC' } : undefined);
+};
 const fmtDT = (d) => { if (!d) return ''; const x = new Date(d); return x.toLocaleDateString('ru-RU') + ' ' + x.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); };
 const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
-const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + Number(n)); return x.toISOString().slice(0, 10); };
+const addDays = (d, n) => { const x = new Date(d); x.setUTCDate(x.getUTCDate() + Number(n)); return x.toISOString().slice(0, 10); };
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-zа-я0-9]+/gi, '_').replace(/^_|_$/g, '').slice(0, 40) || uid('f_');
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
@@ -54,14 +100,15 @@ function parseCSV(text) {
 }
 
 /* ---------- хранилище (IndexedDB) ---------- */
-const STORES = ['users', 'registries', 'patients', 'events', 'mdt', 'proms', 'audit', 'settings', 'saved', 'queries', 'trials', 'alloc', 'screening', 'journals', 'jrecs', 'files', 'comments', 'refs', 'docs', 'doctpl'];
+const DB_VERSION = 4;
+const STORES = ['users', 'registries', 'patients', 'events', 'mdt', 'proms', 'audit', 'settings', 'saved', 'queries', 'trials', 'alloc', 'screening', 'journals', 'jrecs', 'files', 'comments', 'refs', 'docs', 'doctpl', 'coverage'];
 /* учебный режим: отдельная база-песочница с вымышленными пациентами */
 const TRAIN = (() => { try { return localStorage.getItem('addall2.mode') === 'train'; } catch (e) { return false; } })();
 const DB = {
   db: null,
   open() {
     return new Promise((res, rej) => {
-      const r = indexedDB.open(TRAIN ? 'addall2_train' : 'addall2', 3);
+      const r = indexedDB.open(TRAIN ? 'addall2_train' : 'addall2', DB_VERSION);
       r.onupgradeneeded = () => { const d = r.result; STORES.forEach(s => { if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' }); }); };
       r.onsuccess = () => { this.db = r.result; this.db.onversionchange = () => { try { this.db.close(); } catch (e) {} document.body.innerHTML = '<div style="font:16px Segoe UI,Arial;padding:40px">База AddAll очищается или обновляется в другой вкладке. <a href="index.html">Открыть заново</a></div>'; }; res(); };
       r.onerror = () => rej(r.error);
@@ -75,7 +122,17 @@ const DB = {
   },
   all(store) { return new Promise((res, rej) => { const r = this.db.transaction(store).objectStore(store).getAll(); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
   get(store, id) { return new Promise((res, rej) => { const r = this.db.transaction(store).objectStore(store).get(id); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
-  rawPut(store, obj) { return this.tx(store, 'readwrite', s => { s.put(obj); }); },
+  rawPut(store, obj) {
+    return this.tx(store, 'readwrite', s => {
+      if (store === 'patients' && !obj.seq) {
+        const patients = s.getAll();
+        patients.onsuccess = () => {
+          obj.seq = patients.result.reduce((max, p) => Math.max(max, Number(p.seq) || 0), 0) + 1;
+          s.put(obj);
+        };
+      } else s.put(obj);
+    });
+  },
   rawDel(store, id) { return this.tx(store, 'readwrite', s => { s.delete(id); }); },
   clear(store) { return this.tx(store, 'readwrite', s => { s.clear(); }); },
   /* запись с аудитом */
@@ -84,8 +141,9 @@ const DB = {
     if (!obj.id) obj.id = uid(store.slice(0, 2) + '_');
     obj.updatedAt = nowISO(); obj.updatedBy = Auth.user?.id || null;
     if (!before) { obj.createdAt = obj.createdAt || obj.updatedAt; obj.createdBy = obj.createdBy || obj.updatedBy; }
-    /* 2.11: порядковый номер пациента при любом способе создания (диалог, ИИ, импорт) */
-    if (store === 'patients' && !obj.seq) obj.seq = (await this.all('patients')).reduce((mx, x) => Math.max(mx, x.seq || 0), 0) + 1;
+    if (typeof FIRE !== 'undefined' && FIRE.on && store === 'patients' && !obj.seq) {
+      obj.seq = (await this.all('patients')).reduce((max, p) => Math.max(max, Number(p.seq) || 0), 0) + 1;
+    }
     await this.rawPut(store, obj);
     if (store !== 'audit') await Audit.log(action || (before ? 'изменение' : 'создание'), store, obj.id, before, obj);
     return obj;
@@ -104,7 +162,7 @@ const Audit = {
     if (before && after) {
       const a = before.data || before, b = after.data || after;
       Object.keys({ ...a, ...b }).forEach(k => {
-        if (['updatedAt', 'updatedBy', 'pass', 'salt', 'seq', 'ptr'].includes(k)) return;
+        if (['updatedAt', 'updatedBy', 'pass', 'salt', 'seq', 'ptr', 'rev'].includes(k)) return;
         if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) diff[k] = [a[k], b[k]];
       });
       if (!Object.keys(diff).length) return;
@@ -140,6 +198,11 @@ async function hashPass(pass, salt) {
   let h = 5381; for (const b of data) h = ((h << 5) + h + b) >>> 0; return 'x' + h.toString(16);
 }
 async function checkOwnPass(u, pass) { return (await hashPass(pass, u.salt)) === u.pass; }
+async function setUserPassword(user, pass) {
+  user.salt = uid('s');
+  user.pass = await hashPass(pass, user.salt);
+  user.passChangedAt = nowISO();
+}
 const Auth = {
   user: null,
   async login(login, pass) {
@@ -166,8 +229,9 @@ const Auth = {
   async restore() { const id = sessionStorage.getItem('addall2_uid'); if (id) { const u = await DB.get('users', id); if (u && u.active !== false) this.user = u; } },
   async logout() { if (this.user) await DB.rawPut('audit', { id: uid('au_'), ts: nowISO(), user: this.user.id, userName: this.user.name, action: 'выход', store: 'users', recId: this.user.id }); this.user = null; sessionStorage.removeItem('addall2_uid'); location.hash = ''; App.boot(); },
   async createUser({ name, login, pass, role, position, code }) {
-    const salt = uid('s');
-    return DB.put('users', { name, login: login.trim(), salt, pass: await hashPass(pass, salt), passChangedAt: nowISO(), role, position: position || '', code: code || '', active: true });
+    const user = { name, login: login.trim(), role, position: position || '', code: code || '', active: true };
+    await setUserPassword(user, pass);
+    return DB.put('users', user);
   }
 };
 
@@ -405,18 +469,19 @@ function regAccess(r) {
   if (r.createdBy === u.id || r.proposedBy === u.id) return 'owner';
   if ((r.members || []).includes(u.id)) return 'member';
   if ((u.regAccess || []).includes(r.id)) return 'grant';
-  const sc = r.scope || 'dept', sameC = !r.center || !u.center || r.center === u.center;
-  if (sc === 'center' && sameC) return 'center';
+  if (r.status === 'на одобрении') return null;
+  const sc = r.scope || 'dept', sameC = typeof NET !== 'undefined' && NET.on ? (r.center || '') === (u.center || '') : !r.center || !u.center || r.center === u.center;
+  if (sc === 'center' && sameC && (!(typeof NET !== 'undefined' && NET.on) || !!u.center)) return 'center';
   if (sc === 'dept' && r.dept && u.dept && r.dept === u.dept && sameC) return 'dept';
   return null;
 }
 function regAllowed(x) { if (Auth.user?.role === 'admin') return true; const r = typeof x === 'string' ? REGS.get(x) : x; return !!regAccess(r); }
-function regManage(r) { const u = Auth.user; if (!u || !r) return false; if (u.role === 'admin' || r.createdBy === u.id) return true; return u.role === 'lead' && !!r.dept && r.dept === u.dept; }
+function regManage(r) { const u = Auth.user; if (!u || !r) return false; if (u.role === 'admin' || r.createdBy === u.id) return true; return u.role === 'lead' && !!r.dept && r.dept === u.dept && (!(typeof NET !== 'undefined' && NET.on) || (r.center || '') === (u.center || '')); }
 async function loadRegs() {
   const all = await DB.all('registries'); let users = null;
   for (const r of all) if (!r.dept) {
     users = users || await DB.all('users'); const c = users.find(x => x.id === (r.proposedBy || r.createdBy));
-    r.dept = c?.dept || Settings.data.department || ''; r.center = r.center || c?.center || ''; r.scope = r.scope || 'dept'; if (r.dept) await DB.rawPut('registries', r);
+    r.dept = c?.dept || Settings.data.department || ''; r.center = r.center || c?.center || ''; r.scope = r.scope || 'dept'; if (r.dept && !(typeof NET !== 'undefined' && NET.on)) await DB.rawPut('registries', r);
   }
   REGS.clear(); all.forEach(r => REGS.set(r.id, r)); return all;
 }

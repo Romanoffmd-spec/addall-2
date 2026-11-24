@@ -289,17 +289,17 @@ function renderEventForm(root, reg, patient, et, data, eventDate, users) {
   };
   root.oninput = refresh; root.onchange = refresh;
   /* двойной щелчок по варианту «да/нет» очищает ответ */
-  root.ondblclick = (e) => { const seg = e.target.closest('[data-seg]'); if (!seg || root.dataset.ro) return; $$('input', seg).forEach(i => i.checked = false); refresh(); };
+  root.ondblclick = (e) => { const seg = e.target.closest('[data-seg]'); if (!seg || root.dataset.ro) return; $$('input', seg).forEach(i => i.checked = false); root.dispatchEvent(new Event('input')); };
   root.onclick = (e) => {
     const dg = e.target.closest('.dgr');
     if (dg && !root.dataset.ro) { const w = dg.closest('[data-wrap]'); const f = formFields(et).find(x => x.key === w.dataset.wrap); const o = dg.dataset.o;
       if (f.type === 'multiselect') { const cb = $$('[data-multi] input', w).find(i => i.value === o); if (cb && !cb.disabled) cb.checked = !cb.checked; }
       else { const sel = $('select[data-k]', w); if (sel) sel.value = sel.value === o ? '' : o; }
-      refresh(); return; }
+      root.dispatchEvent(new Event('input')); return; }
     const gb = e.target.closest('[data-gadd],[data-ged],[data-gdel]');
     if (gb) {
       const box = gb.closest('[data-grp]'); const f = formFields(et).find(x => x.key === box.dataset.k); let list = []; try { list = JSON.parse(box.dataset.val || '[]'); } catch (x) {}
-      const put = (l) => { box.dataset.val = JSON.stringify(l); box.innerHTML = grpHTML(f, l, users); refresh(); };
+      const put = (l) => { box.dataset.val = JSON.stringify(l); box.innerHTML = grpHTML(f, l, users); root.dispatchEvent(new Event('input')); };
       const ro = !!gb.closest('[data-ro]');
       if (gb.dataset.gdel != null) { confirmBox('Удалить запись «' + (f.itemLabel || f.label) + ' ' + (Number(gb.dataset.gdel) + 1) + '» вместе с вложенными?').then(ok => { if (ok) { list.splice(Number(gb.dataset.gdel), 1); put(list); } }); return; }
       const i = gb.dataset.ged != null ? Number(gb.dataset.ged) : -1;
@@ -312,7 +312,7 @@ function renderEventForm(root, reg, patient, et, data, eventDate, users) {
       const cur = $$('.comp-row', box).map(r => ({ name: $('[data-cn]', r).value, grade: $('[data-cg]', r).value, date: $('[data-cd]', r).value }));
       if (add) cur.push({ name: '', grade: 'I', date: '' });
       if (rm) cur.splice(Number(rm.closest('.comp-row').dataset.i), 1);
-      box.innerHTML = compRows(cur, f); refresh();
+      box.innerHTML = compRows(cur, f); root.dispatchEvent(new Event('input'));
     }
   };
   refresh();
@@ -685,16 +685,27 @@ function scoreInstrument(ins, answers) {
 function evalIndicator(ind, events, patients, reg) {
   const et = reg.eventTypes.find(e => e.id === ind.et);
   let den = 0, num = 0, miss = 0, naN = 0; const denIds = [], numIds = [], missIds = [];
-  events.filter(e => e.type === ind.et).forEach(e => {
-    const p = patients.find(x => x.id === e.patientId);
+  const patientById = new Map(patients.filter(p => !p.registryId || p.registryId === reg.id).map(p => [p.id, p]));
+  const markMissing = e => { miss++; missIds.push(e.id); };
+  events.filter(e => e.type === ind.et && (!e.registryId || e.registryId === reg.id)).forEach(e => {
+    const p = patientById.get(e.patientId);
+    if (!p) return;
     const v = computeValues(reg, p, et, e.data, e.date);
-    if (ind.denom && ind.denom.key && !condOK(ind.denom, v)) return;
+    if (ind.denom?.key) {
+      if (isEmpty(v[ind.denom.key]) && !['empty', 'filled'].includes(ind.denom.op)) {
+        if (v._na?.[ind.denom.key] === 'na') naN++;
+        else markMissing(e);
+        return;
+      }
+      if (!condOK(ind.denom, v)) return;
+    }
+    if (e.status === 'черновик') { markMissing(e); return; }
     if (ind.num.key && isEmpty(v[ind.num.key]) && !['empty', 'filled'].includes(ind.num.op)) {
       /* 2.11: поле скрыто условием (например, степень ISREC при отсутствии несостоятельности): случай считается без события */
       const nf = formFields(et || {}).find(f => f.key === ind.num.key);
       const na = nf && nf.showIf && nf.showIf.key && !isEmpty(v[nf.showIf.key]) && !condOK(nf.showIf, v);
       if (v._na && v._na[ind.num.key] === 'na') { naN++; return; } /* 2.11: отмечено "не применимо": случай вне знаменателя */
-      if (!na) { miss++; missIds.push(e.id); return; }
+      if (!na) { markMissing(e); return; }
     }
     den++; denIds.push(e.id); if (condOK(ind.num, v)) { num++; numIds.push(e.id); }
   });

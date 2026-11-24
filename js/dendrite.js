@@ -11,7 +11,7 @@ const _navGroups = navGroups;
 navGroups = async function () {
   const g = await _navGroups();
   const add = (id, items) => { const x = g.find(y => y.id === id); if (x && x.items) x.items.push(...items.filter(Boolean)); };
-  add('work', [{ sep: 'Мои данные' }, { r: 'mydata', t: 'Экспорт моих данных', i: '⇩' }, { r: 'delegates', t: 'Делегаты (ввод за врача)', i: '⇄' }, { r: 'training', t: TRAIN ? 'Выйти из учебного режима' : 'Учебный режим', i: '✎' }]);
+  add('work', [{ sep: 'Мои данные' }, { r: 'mydata', t: 'Экспорт моих данных', i: '⇩' }, { r: 'delegates', t: 'Делегаты (ввод за врача)', i: '⇄' }, { r: 'training', t: 'Учебный режим', i: '✎' }]);
   add('sci', [{ sep: 'Отчёты' }, can('analyse') && { r: 'surgeon', t: 'Отчёт хирурга и сертификат', i: '☆' }, { r: 'regdocs', t: 'Документы регистров', i: '⎙' }]);
   add('adm', [can('users') && { r: 'dsr', t: 'Запросы субъектов данных', i: '⚖' }]);
   return g;
@@ -20,7 +20,7 @@ navGroups = async function () {
 /* ---------- общие помощники ---------- */
 const wilson = (k, n, z = 1.959963984540054) => { if (!n) return { p: null, lo: null, hi: null }; const p = k / n, d = 1 + z * z / n, c = p + z * z / (2 * n), r = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)); return { p, lo: Math.max(0, (c - r) / d), hi: Math.min(1, (c + r) / d) }; };
 const pc1 = x => x == null ? '-' : (Math.round(x * 1000) / 10).toString().replace('.', ',') + '%';
-const yearsBack = (n) => { const d = new Date(); d.setFullYear(d.getFullYear() - n); return d.toISOString().slice(0, 10); };
+const yearsBack = (n) => { const d = new Date(); d.setFullYear(d.getFullYear() - n); return localDateISO(d); };
 function sheetName(s, used) { let n = String(s || 'Лист').replace(/[\\/?*[\]:']/g, ' ').slice(0, 28) || 'Лист'; let k = n, i = 2; while (used.has(k)) k = n.slice(0, 26) + ' ' + i++; used.add(k); return k; }
 
 /* XLSX с несколькими листами */
@@ -204,19 +204,111 @@ Pages.login = async function (mode = 'login') {
 };
 
 /* ================= УЧЕБНЫЙ РЕЖИМ ================= */
-function setTraining(on) { try { localStorage.setItem('addall2.mode', on ? 'train' : 'live'); } catch (e) {} sessionStorage.removeItem('addall2_uid'); location.hash = ''; location.reload(); }
-async function seedTraining() {
-  if ((await DB.all('users')).length) return;
-  /* копируем структуру из рабочей базы: пользователи, регистры, настройки, журналы, шаблоны. Пациентов не копируем */
-  const src = await new Promise((res) => { const r = indexedDB.open('addall2'); r.onsuccess = () => res(r.result); r.onerror = () => res(null); r.onupgradeneeded = () => { r.transaction.abort(); res(null); }; });
-  if (!src) return;
-  for (const st of ['users', 'registries', 'settings', 'journals', 'doctpl']) {
-    if (!src.objectStoreNames.contains(st)) continue;
-    const rows = await new Promise(res => { const q = src.transaction(st).objectStore(st).getAll(); q.onsuccess = () => res(q.result || []); q.onerror = () => res([]); });
-    for (const x of rows) await DB.rawPut(st, x);
-  }
-  src.close();
+const TRAIN_USER = { id: 'training-admin', login: 'training', name: 'Учебный пользователь', role: 'admin', active: true, center: 'Учебный центр', dept: 'Учебное отделение' };
+
+function trainingDB(name, create = false) {
+  return new Promise((resolve, reject) => {
+    const request = create ? indexedDB.open(name, DB_VERSION) : indexedDB.open(name);
+    request.onupgradeneeded = () => {
+      if (!create) { request.transaction.abort(); return; }
+      for (const store of STORES) if (!request.result.objectStoreNames.contains(store)) request.result.createObjectStore(store, { keyPath: 'id' });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => create ? reject(request.error) : resolve(null);
+    request.onblocked = () => reject(new Error('Закройте другие вкладки AddAll и попробуйте снова'));
+  });
 }
+
+async function addTrainingSchemas(target, templates) {
+  if (!templates.length) return 0;
+  return new Promise((resolve, reject) => {
+    const tx = target.transaction('registries', 'readwrite');
+    const store = tx.objectStore('registries');
+    let added = 0;
+    for (const template of templates) {
+      if (!template.id || !Array.isArray(template.eventTypes)) continue;
+      const lookup = store.get(template.id);
+      lookup.onsuccess = () => {
+        if (lookup.result) return;
+        const reg = { id: template.id, createdBy: TRAIN_USER.id, center: TRAIN_USER.center, dept: TRAIN_USER.dept,
+          scope: 'dept', status: 'активен' };
+        for (const key of ['name', 'description', 'version', 'patientFields', 'eventTypes', 'indicators', 'instruments', 'schedules', 'keyDates', 'followupEvery']) {
+          if (Object.hasOwn(template, key)) reg[key] = template[key];
+        }
+        reg.lists = (template.lists || []).map(list => list.manual ? { ...list, manual: [] } : list);
+        store.put(reg);
+        added++;
+      };
+    }
+    tx.oncomplete = () => resolve(added);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+async function loadTrainingSource() {
+  const liveId = sessionStorage.getItem('addall2.trainingSourceUser');
+  if (!liveId) return [];
+  const base = await trainingDB('addall2');
+  if (!base) return [];
+  const read = (table, id) => new Promise((resolve, reject) => {
+    const store = base.transaction(table).objectStore(table), request = id ? store.get(id) : store.getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try {
+    const [user, registries] = await Promise.all([read('users', liveId), read('registries')]);
+    if (!user || user.active === false) return [];
+    const previous = Auth.user;
+    Auth.user = user;
+    try { return registries.filter(regAccess); }
+    finally { Auth.user = previous; }
+  } finally { base.close(); }
+}
+
+let switchingTraining = false;
+async function setTraining(on) {
+  if (switchingTraining) return;
+  switchingTraining = true;
+  try {
+    if (on && Auth.user) {
+      const templates = await Data.registries();
+      const target = await trainingDB('addall2_train', true);
+      try { await addTrainingSchemas(target, templates); } finally { target.close(); }
+      sessionStorage.setItem('addall2.trainingSourceUser', Auth.user.id);
+    }
+    localStorage.setItem('addall2.mode', on ? 'train' : 'live');
+    sessionStorage.removeItem('addall2_uid');
+    location.hash = '';
+    location.reload();
+  } catch (error) { toast(error.message, 'err'); }
+  finally { switchingTraining = false; }
+}
+
+async function seedTraining() {
+  if (!(await DB.get('users', TRAIN_USER.id))) {
+    await DB.rawPut('users', { ...TRAIN_USER });
+    await DB.rawPut('users', { id: 'training-doctor', login: 'training-doctor', name: 'Учебный врач', role: 'surgeon', active: true, center: TRAIN_USER.center, dept: TRAIN_USER.dept });
+  }
+  if (!(await DB.get('settings', 'main'))) {
+    await DB.rawPut('settings', { id: 'main', center: TRAIN_USER.center, department: TRAIN_USER.dept, centers: [TRAIN_USER.center], departments: [TRAIN_USER.dept], anonCodes: true });
+  }
+  if ((await DB.all('registries')).length) return;
+  try { await addTrainingSchemas(DB.db, await loadTrainingSource()); } catch (error) { }
+  if (!(await DB.all('registries')).length) {
+    const sample = TEMPLATES.colorectal.make();
+    Object.assign(sample, { id: 'training-example', name: 'Учебный колоректальный регистр', createdBy: TRAIN_USER.id, center: TRAIN_USER.center, dept: TRAIN_USER.dept, status: 'активен' });
+    await DB.rawPut('registries', sample);
+  }
+}
+
+if (TRAIN) {
+  Auth.restore = async function () {
+    this.user = { ...TRAIN_USER };
+    sessionStorage.setItem('addall2_uid', TRAIN_USER.id);
+  };
+  Auth.logout = () => setTraining(false);
+}
+
 const _boot = App.boot.bind(App);
 App.boot = async function () {
   if (TRAIN && !App._seeded) { App._seeded = true; if (!DB.db) await DB.open(); await seedTraining(); document.documentElement.classList.add('train'); }
@@ -225,7 +317,7 @@ App.boot = async function () {
 const _route2 = App.route.bind(App);
 App.route = async function (...a) {
   const r = await _route2(...a);
-  if (TRAIN && Auth.user && !$('#trainBar')) document.body.insertAdjacentHTML('afterbegin', `<div id="trainBar">Учебный режим: вымышленные данные в отдельной базе <button onclick="setTraining(false)">Выйти</button></div>`);
+  if (TRAIN && Auth.user && !$('#trainBar')) document.body.insertAdjacentHTML('afterbegin', `<div id="trainBar">Учебный режим: вымышленные данные в отдельной базе <button type="button" id="trGuide">Пошаговый гайд</button><button type="button" onclick="setTraining(false)">Выйти</button></div>`);
   return r;
 };
 
@@ -235,63 +327,151 @@ const SYN = {
   fn: { М: ['Арман', 'Ерлан', 'Сергей', 'Данияр', 'Алексей', 'Бауыржан', 'Тимур', 'Олжас'], Ж: ['Айгерим', 'Мария', 'Динара', 'Елена', 'Асель', 'Гульнара', 'Ольга', 'Жанна'] },
   rnd: (a) => a[Math.floor(Math.random() * a.length)], rint: (a, b) => a + Math.floor(Math.random() * (b - a + 1)),
   icd: ['C18.7', 'C20', 'C19', 'C18.2', 'K57.3', 'K40.9', 'C21.0'],
-  value(f, date, users) {
-    const r = this.rnd, ri = this.rint;
+  value(f, ctx) {
+    const { date, users, people, patient } = ctx;
+    const r = this.rnd, ri = this.rint, options = f.options || [];
     switch (f.type) {
-      case 'select': return (f.options || []).length ? r(f.options) : '';
-      case 'multiselect': return (f.options || []).filter(() => Math.random() < .3).slice(0, 2);
-      case 'yesno': return Math.random() < .25 ? 'да' : 'нет';
-      case 'number': { const lo = f.min !== '' && f.min != null ? Number(f.min) : 0, hi = f.max !== '' && f.max != null ? Number(f.max) : (lo + 100); return Math.round((lo + Math.random() * (hi - lo)) * 10) / 10; }
-      case 'date': return addDays(date, ri(-10, 30));
-      case 'user': { const s = users.filter(u => u.active !== false); return s.length ? r(s).id : ''; }
-      case 'icd10': return r(this.icd);
-      case 'complist': return Math.random() < .3 ? [{ name: (f.options || ['Осложнение'])[0] || 'Осложнение', grade: r(['I', 'II', 'II', 'IIIa', 'IIIb']), date: addDays(date, ri(1, 10)) }] : [];
-      case 'group': return Array.from({ length: ri(1, 3) }, () => this.fill(f.subfields || [], date, users));
-      case 'textarea': case 'text': return Math.random() < .3 ? 'учебная запись' : '';
+      case 'select': return options.length ? r(options) : '';
+      case 'multiselect': {
+        if (!options.length) return [];
+        const answers = options.filter(() => Math.random() < .35).slice(0, 2);
+        return answers.length ? answers : [r(options)];
+      }
+      case 'yesno': return Math.random() < .3 ? 'да' : 'нет';
+      case 'number': {
+        const lo = f.min === '' || f.min == null ? (Number.isFinite(Number(f.max)) && f.max !== '' ? Math.min(0, Number(f.max) - 20) : 0) : Number(f.min);
+        const hi = f.max === '' || f.max == null ? lo + 100 : Number(f.max);
+        if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi < lo) return '';
+        const rounded = Math.round((lo + Math.random() * (hi - lo)) * 10) / 10;
+        return Math.min(hi, Math.max(lo, rounded));
+      }
+      case 'date': return [addDays(date, ri(-7, 4)), today()].sort()[0];
+      case 'user': return users.length ? r(users).id : '__ext';
+      case 'icd10': return options.length ? r(options) : r(this.icd);
+      case 'icdo': {
+        const codes = (window.ICDO || []).slice(0, 18);
+        return options.length ? r(options) : (codes.length ? r(codes)[0] : '8010/3');
+      }
+      case 'patient': {
+        const others = people.filter(p => p.id !== patient?.id);
+        return others.length ? r(others).id : '';
+      }
+      case 'complist': return (f.required || Math.random() < .3)
+        ? [{ name: options.length ? r(options) : 'Учебное осложнение', grade: r(['I', 'II', 'IIIa', 'IIIb']), date: [addDays(date, ri(1, 10)), today()].sort()[0] }]
+        : [];
+      case 'group': return Array.from({ length: ri(1, 3) }, () => this.fill(f.subfields || [], ctx));
+      case 'textarea':
+      case 'text': return 'Учебное значение: ' + f.label + ' ' + ri(1, 99);
       default: return '';
     }
   },
-  fill(fields, date, users) { const o = {}; fields.forEach(f => { if (f.type === 'calc' || f.type === 'patient' || f.type === 'icdo') return; if (!f.required && Math.random() < .15) return; o[f.key] = this.value(f, date, users); }); return o; },
+  fill(fields, ctx) {
+    const data = {};
+    for (const f of fields) {
+      if (f.type === 'calc' || (!f.required && !f.key_ && Math.random() < .12)) continue;
+      data[f.key] = this.value(f, ctx);
+    }
+    const values = { ...(ctx.patient?.data || {}), birthDate: ctx.patient?.birthDate, sex: ctx.patient?.sex, eventDate: ctx.date, ...data };
+    for (const f of fields) if (f.type === 'calc' && f.formula) values[f.key] = data[f.key] = evalFormula(f.formula, values);
+    return Object.fromEntries(fields.filter(f => Object.hasOwn(data, f.key) && condOK(f.showIf, values)).map(f => [f.key, data[f.key]]));
+  },
   async make(reg, n) {
-    const users = await Data.users(); let made = 0;
-    const startEt = reg.keyDates?.start || reg.eventTypes[0]?.id;
+    const users = (await Data.users()).filter(user => user.active !== false);
+    const types = reg.eventTypes || [];
+    const date = today();
+    const people = [];
+    const center = Auth.user.center || reg.center || centers()[0] || '';
     for (let i = 0; i < n; i++) {
       const sex = Math.random() < .5 ? 'М' : 'Ж';
-      const p = await DB.put('patients', { registryId: reg.id, localId: 'T-' + String(Date.now() % 100000).padStart(5, '0') + '-' + (i + 1), lastName: this.rnd(this.ln) + (sex === 'Ж' ? 'а' : ''), firstName: this.rnd(this.fn[sex]), middleName: '', sex, birthDate: `${this.rint(1940, 1995)}-${String(this.rint(1, 12)).padStart(2, '0')}-${String(this.rint(1, 28)).padStart(2, '0')}`, consent: 'получено', vital: Math.random() < .06 ? 'умер' : 'жив', center: (centers()[0] || ''), data: this.fill(reg.patientFields || [], today(), users), synthetic: true }, 'учебный пациент');
-      let d = addDays(today(), -this.rint(30, 1000));
-      const ordered = [...reg.eventTypes].sort((a, b) => (a.id === startEt ? -1 : b.id === startEt ? 1 : 0));
-      for (const et of ordered) {
-        const k = et.single !== false && /наблюд|контрол|follow/i.test(et.name) ? this.rint(0, 3) : 1;
-        for (let j = 0; j < k; j++) {
-          if (d > today()) break;
-          const data = {}; (et.sections || []).forEach(s => Object.assign(data, this.fill(s.fields || [], d, users)));
-          const vals = computeValues(reg, p, et, data, d); const errs = validateEvent(et, vals);
-          await DB.put('events', { patientId: p.id, registryId: reg.id, type: et.id, date: d, data, status: errs.length ? 'черновик' : 'завершено', schemaVersion: reg.version, ownerId: Auth.user.id }, 'учебное событие');
-          d = addDays(d, this.rint(5, 120));
+      const genderedName = this.rnd(this.ln) + (sex === 'Ж' ? 'а' : '');
+      const id = uid('tp_');
+      people.push(await DB.put('patients', {
+        id, registryId: reg.id, localId: 'T-' + id.slice(3), lastName: genderedName + ' (учебный)', firstName: this.rnd(this.fn[sex]),
+        sex, birthDate: addDays(date, -this.rint(6600, 31000)), consent: 'получено', vital: 'жив', center, data: {}, synthetic: true
+      }, 'учебный пациент'));
+    }
+
+    const start = Out30.startType(reg);
+    const outcome = Out30.form(reg, start);
+    for (const patient of people) {
+      patient.data = this.fill(reg.patientFields || [], { date, users, people, patient });
+      if (Object.keys(patient.data).length) await DB.put('patients', patient, 'поля учебного пациента');
+      let day = addDays(date, -this.rint(65, 720) - types.length * 25);
+      let anchor = null;
+      for (const type of types) {
+        const repeats = type.single === false && /наблюд|контрол|follow/i.test(type.name) ? this.rint(1, 3) : 1;
+        for (let index = 0; index < repeats; index++) {
+          const eventDate = day <= date ? day : date;
+          const data = this.fill(formFields(type), { date: eventDate, users, people, patient });
+          const values = computeValues(reg, patient, type, data, eventDate);
+          const status = validateEvent(type, values).length ? 'черновик' : 'завершено';
+          const record = { patientId: patient.id, registryId: reg.id, type: type.id, date: eventDate, data, status,
+            schemaVersion: reg.version, ownerId: Auth.user.id, synthetic: true };
+          if (outcome?.type.id === type.id && status !== 'черновик') {
+            const opDate = outcome.inline ? eventDate : anchor?.date;
+            if (opDate) {
+              const due = addDays(opDate, Out30.DAYS);
+              if (due <= date) record.out30CheckedOn = eventDate > due ? eventDate : due;
+              if (!outcome.inline) record.anchorEventId = anchor.id;
+            }
+          }
+          const saved = await DB.put('events', record, 'учебное событие');
+          if (type.id === start) anchor = saved;
+          day = addDays(day, this.rint(5, 25));
         }
       }
-      made++;
     }
-    return made;
+    return people.length;
   }
 };
-Routes.training = async (main) => {
+
+Routes.training = async (main, regId = '') => {
   const regs = await Data.registries();
+  const selected = regs.find(r => r.id === regId)?.id || regs[0]?.id || '';
   main.innerHTML = `<div class="head"><h1>Учебный режим</h1></div>
-    <div class="card"><p>Учебный режим открывает <b>отдельную базу</b>: в ней те же регистры, формы и пользователи, но пациенты вымышленные. Здесь резиденты и новые сотрудники учатся заполнять формы, не рискуя настоящими данными. Учебная база хранится отдельно и в рабочую не попадает.</p>
-    <p>Сейчас: <b>${TRAIN ? 'учебный режим' : 'рабочая база'}</b>.</p><button class="btn primary" id="trGo">${TRAIN ? 'Вернуться в рабочую базу' : 'Перейти в учебный режим'}</button></div>
-    ${TRAIN ? `<div class="card"><h3>Генератор вымышленных пациентов</h3><p class="muted">Создаёт пациентов с правдоподобными случайными значениями во всех полях регистра (с учётом вариантов, диапазонов, обязательности и вложенных записей). Подходит для обучения и проверки аналитики.</p>
-      <div class="row">${regSelect(regs, regs[0]?.id, 'trReg', false)}<input class="inp" type="number" id="trN" value="25" min="1" max="500" style="max-width:110px"><button class="btn primary" id="trMake">Сгенерировать</button></div></div>
-    <div class="card"><h3>Очистить учебную базу</h3><p class="muted">Удаляет всех учебных пациентов и их события. Регистры и пользователи остаются.</p><button class="btn danger" id="trClr">Очистить пациентов</button>
-      <button class="btn" id="trSync">Обновить структуру из рабочей базы</button></div>` : ''}`;
-  $('#trGo').onclick = () => setTraining(!TRAIN);
+    <div class="card"><p>Песочница хранит вымышленные карточки отдельно. Здесь можно пройти рабочие сценарии, создавать регистры и менять их формы.</p>
+      <div class="row"><button class="btn ${TRAIN ? '' : 'primary'}" id="trGo">${TRAIN ? 'Вернуться в рабочую базу' : 'Перейти в учебный режим'}</button>
+      ${TRAIN ? '<button class="btn" id="trGuideStart">Начать пошаговый гайд</button>' : ''}</div></div>
+    ${TRAIN ? `<div class="card"><h3>Генератор вымышленных пациентов</h3>
+      <p class="muted">Для каждого выбранного регистра генератор использует его типы событий, варианты ответов, диапазоны, условия полей и вложенные записи.</p>
+      ${regs.length ? `<div class="row" id="trControls">
+        <label for="trReg">Регистр</label><select class="inp" id="trReg">${regs.map(reg => `<option value="${esc(reg.id)}" ${selected === reg.id ? 'selected' : ''}>${esc(reg.name)}</option>`).join('')}<option value="__all">Все учебные регистры</option></select>
+        <label for="trN">Пациентов на регистр</label><input class="inp" type="number" id="trN" value="25" min="1" max="500" style="max-width:100px">
+        <button class="btn primary" id="trMake">Сгенерировать</button></div>` : '<a class="btn primary" href="#registries/new">Создать регистр</a>'}</div>
+    <div class="card"><h3>Учебные данные</h3><div class="row"><button class="btn danger" id="trClr">Очистить пациентов</button><button class="btn" id="trSync">Добавить схемы из рабочей базы</button></div></div>` : ''}`;
+  $('#trGo', main).onclick = () => setTraining(!TRAIN);
   if (!TRAIN) return;
-  $('#trMake').onclick = async () => { const r = regs.find(x => x.id === $('#trReg').value); const n = Math.min(500, Math.max(1, Number($('#trN').value || 1))); $('#trMake').disabled = true; $('#trMake').textContent = 'Создаю…'; const k = await SYN.make(r, n); toast('Создано пациентов: ' + k); go('patients/' + r.id); };
-  $('#trClr').onclick = async () => { if (!(await confirmBox('Удалить всех учебных пациентов и их события?'))) return; for (const st of ['events', 'proms', 'patients', 'mdt', 'queries', 'alloc', 'files', 'comments']) for (const x of await DB.all(st)) await DB.del(st, x.id); toast('Учебная база очищена'); App.route(); };
-  $('#trSync').onclick = async () => { const src = await new Promise(res => { const r = indexedDB.open('addall2'); r.onsuccess = () => res(r.result); r.onerror = () => res(null); });
-    if (!src) return toast('Рабочая база не найдена', 'err');
-    for (const st of ['registries', 'users', 'settings']) { const rows = await new Promise(res => { const q = src.transaction(st).objectStore(st).getAll(); q.onsuccess = () => res(q.result || []); }); for (const x of rows) await DB.rawPut(st, x); }
-    src.close(); await Settings.load(); toast('Структура обновлена'); App.boot(); };
+  $('#trGuideStart', main).onclick = () => TrainingGuide.start();
+  const make = $('#trMake', main);
+  if (make) make.onclick = async () => {
+    const chosen = $('#trReg', main).value;
+    const targets = chosen === '__all' ? regs : regs.filter(reg => reg.id === chosen);
+    const count = $('#trN', main).valueAsNumber;
+    if (!targets.length || !Number.isInteger(count) || count < 1 || count > 500) return toast('Выберите регистр и число пациентов от 1 до 500', 'err');
+    make.disabled = true;
+    let total = 0;
+    try {
+      for (const [index, target] of targets.entries()) {
+        make.textContent = `Создаю… ${index + 1} из ${targets.length}`;
+        total += await SYN.make(target, count);
+      }
+      toast(`Создано учебных пациентов: ${total}`);
+      go(chosen === '__all' ? 'patients' : 'patients/' + targets[0].id);
+    } catch (error) { toast(`Генерация остановлена. Создано в завершённых пакетах: ${total}. ${error.message}`, 'err'); }
+    finally { make.disabled = false; make.textContent = 'Сгенерировать'; }
+  };
+  $('#trClr', main).onclick = async () => {
+    if (!(await confirmBox('Удалить всех учебных пациентов и связанные записи?'))) return;
+    for (const store of ['events', 'proms', 'patients', 'mdt', 'queries', 'alloc', 'screening', 'files', 'comments', 'coverage']) await DB.clear(store);
+    toast('Учебные пациенты удалены'); App.route();
+  };
+  $('#trSync', main).onclick = async () => {
+    try {
+      const added = await addTrainingSchemas(DB.db, await loadTrainingSource());
+      toast(added ? 'Добавлено схем: ' + added : 'Нет новых доступных схем');
+      App.route();
+    } catch (error) { toast(error.message, 'err'); }
+  };
 };
 
 /* ================= ОТЧЁТ ХИРУРГА (как публичные отчёты NBSR) И СЕРТИФИКАТ ================= */

@@ -28,11 +28,29 @@ NET.dec = (o) => {
 };
 
 if (NET.on) {
+  const newPasswords = new WeakMap();
+  setUserPassword = async (user, pass) => { newPasswords.set(user, pass); };
+  NET.changePassword = async (user, old, pass) => {
+    const result = await NET.call('POST', 'password', { old, pass });
+    if (!result.ok) throw new Error(result.err);
+    delete user.mustChange;
+    Object.assign(user, result.user);
+  };
   Object.assign(DB, {
     async open() { await NET.call('GET', 'ping'); this.db = { server: true }; },
     async all(store) { return (await NET.call('GET', 's/' + store) || []).map(NET.dec); },
     async get(store, id) { if (id == null) return undefined; const o = await NET.call('GET', 's/' + store + '/' + encodeURIComponent(id)); return o ? NET.dec(o) : undefined; },
-    async rawPut(store, obj) { await NET.call('PUT', 's/' + store, await NET.enc(obj)); },
+    async rawPut(store, obj) {
+      if (store === 'audit' && !NET.token()) return;
+      const payload = await NET.enc(obj);
+      if (store === 'users' && newPasswords.has(obj)) {
+        payload._password = newPasswords.get(obj);
+        newPasswords.delete(obj);
+      }
+      const saved = await NET.call('PUT', 's/' + store, payload);
+      if (saved.rev != null) obj.rev = saved.rev;
+      if (saved.seq != null) obj.seq = saved.seq;
+    },
     async rawDel(store, id) { await NET.call('DELETE', 's/' + store + '/' + encodeURIComponent(id)); },
     async clear(store) { await NET.call('DELETE', 's/' + store); }
   });
@@ -51,18 +69,12 @@ if (NET.on) {
   checkOwnPass = async (u, pass) => { try { return !!(await NET.call('POST', 'checkpass', { pass })).ok; } catch (e) { return false; } };
 }
 
-/* учебный режим при работе с сервера: структура и пользователь берутся с сервера, данные остаются в браузере */
+/* Учебная база получает только доступные схемы, если рабочая сессия ещё открыта. */
 if (NET.served && TRAIN) {
-  const fetchJ = async (p) => { const t = NET.token(); const r = await fetch('api/' + p, { headers: t ? { Authorization: 'Bearer ' + t } : {} }); return r.ok ? r.json() : null; };
-  seedTraining = async function () {
-    if ((await DB.all('users')).length) return;
-    for (const st of ['users', 'registries', 'settings', 'journals', 'doctpl']) { const rows = await fetchJ('s/' + st); for (const x of rows || []) await DB.rawPut(st, x); }
-  };
-  const _restoreT = Auth.restore.bind(Auth);
-  Auth.restore = async function () {
-    const me = NET.token() ? await fetchJ('me') : null;
-    if (me && me.user) { const loc = await DB.get('users', me.user.id); await DB.rawPut('users', { ...(loc || {}), ...me.user }); this.user = { ...(loc || {}), ...me.user }; return; }
-    return _restoreT();
+  loadTrainingSource = async () => {
+    if (!NET.token()) return [];
+    const records = await NET.call('GET', 's/registries');
+    return records.filter(record => Array.isArray(record.eventTypes));
   };
 }
 

@@ -137,12 +137,13 @@ Routes.doctpl = async (main, id) => {
   main.innerHTML = `<div class="head"><div><a class="muted" href="#doctpl">← Шаблоны</a><h1>${esc(t.name)}</h1></div><div class="row"><button class="btn danger" id="dt_del">Удалить</button><button class="btn primary" id="dt_s">Сохранить</button></div></div>
     <div class="cols"><div class="card"><div class="grid"><div class="fld"><label class="flab">Название</label><input class="inp" id="dt_n" value="${esc(t.name)}"></div><div class="fld"><label class="flab">Регистр</label>${regSelect(regs, t.registryId, 'dt_r', false)}</div></div>
       <div class="rtbar">${[['bold', 'Ж'], ['italic', 'К'], ['underline', 'Ч'], ['justifyCenter', '≡'], ['insertUnorderedList', '•']].map(([c, l]) => `<button data-c="${c}">${l}</button>`).join('')}<button data-c="hiliteColor">выделить</button></div>
-      <div class="rt" id="dt_b" contenteditable="true">${t.body}</div></div>
+      <div class="rt" id="dt_b" contenteditable="true">${safeRichHTML(t.body)}</div></div>
       <div class="card"><h3>Подстановки</h3><input class="inp" id="dt_q" placeholder="Поиск поля"><div id="dt_ph" style="max-height:60vh;overflow:auto;margin-top:8px"></div></div></div>`;
   const drawPh = () => { const q = $('#dt_q').value.toLowerCase(); $('#dt_ph').innerHTML = ph().filter(([k, l]) => !q || (k + l).toLowerCase().includes(q)).map(([k, l]) => `<button class="mn-it" data-k="${k}"><span>${esc(l)}</span><em class="cnt mono">{{${esc(k)}}}</em></button>`).join(''); $$('[data-k]', $('#dt_ph')).forEach(b => b.onmousedown = e => { e.preventDefault(); $('#dt_b').focus(); document.execCommand('insertText', false, `{{${b.dataset.k}}}`); }); };
   drawPh(); $('#dt_q').oninput = drawPh; $('#dt_r').onchange = drawPh;
   $$('.rtbar [data-c]', main).forEach(b => b.onmousedown = e => { e.preventDefault(); document.execCommand(b.dataset.c, false, b.dataset.c === 'hiliteColor' ? 'yellow' : null); });
-  $('#dt_s').onclick = async () => { Object.assign(t, { name: $('#dt_n').value, registryId: $('#dt_r').value, body: $('#dt_b').innerHTML }); await DB.put('doctpl', t, 'изменение шаблона'); toast('Сохранено'); };
+  bindRichPaste($('#dt_b'));
+  $('#dt_s').onclick = async () => { Object.assign(t, { name: $('#dt_n').value, registryId: $('#dt_r').value, body: safeRichHTML($('#dt_b').innerHTML) }); await DB.put('doctpl', t, 'изменение шаблона'); toast('Сохранено'); };
   $('#dt_del').onclick = async () => { if (await confirmBox('Удалить шаблон?')) { await DB.del('doctpl', t.id); go('doctpl'); } };
 };
 async function docFromTemplate(p, reg, events, users) {
@@ -151,7 +152,9 @@ async function docFromTemplate(p, reg, events, users) {
   const m = modal(`<h2>Документ по шаблону</h2><div class="row"><select class="inp" id="df_t">${tpls.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select><button class="btn" id="df_go">Сформировать</button></div>
     <p class="muted small">Подставленные значения можно править прямо в тексте. «Нет данных» выделено жёлтым.</p><div class="rt" id="df_b" contenteditable="true"></div>
     <div class="row end"><button class="btn" id="df_p">Печать / PDF</button><button class="btn primary" id="df_w">Word (.docx)</button></div>`, { full: true });
-  const gen = () => { const t = tpls.find(x => x.id === $('#df_t', m).value); $('#df_b', m).innerHTML = fillTemplate(t.body, p, reg, events, users); };
+  const editor = $('#df_b', m);
+  bindRichPaste(editor);
+  const gen = () => { const t = tpls.find(x => x.id === $('#df_t', m).value); editor.innerHTML = safeRichHTML(fillTemplate(t.body, p, reg, events, users)); };
   gen(); $('#df_go', m).onclick = gen; $('#df_t', m).onchange = gen;
   $('#df_p', m).onclick = () => printDoc($('#df_t', m).selectedOptions[0].textContent, $('#df_b', m).innerHTML);
   $('#df_w', m).onclick = () => { Office.docx(slug($('#df_t', m).selectedOptions[0].textContent + '_' + p.localId) + '.docx', $('#df_b', m).innerHTML); Audit.log('документ Word', 'patients', p.id, null, null); };

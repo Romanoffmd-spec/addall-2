@@ -15,7 +15,7 @@ const Pages = {
         <div class="fld"><label class="flab">Пароль (от 6 символов) <i class="req">*</i></label><input class="inp" type="password" id="s_pass"></div>
         <div class="fld"><label class="flab">Пароль ещё раз <i class="req">*</i></label><input class="inp" type="password" id="s_pass2"></div>
       </div>
-      <div class="row end"><button class="btn" id="s_restore">Восстановить из резервной копии</button><button class="btn primary" id="s_go">Создать и войти</button></div>
+      <div class="row end"><button class="btn" id="s_train">Открыть учебный режим</button><button class="btn" id="s_restore">Восстановить из резервной копии</button><button class="btn primary" id="s_go">Создать и войти</button></div>
     </div></div>`;
     $('#s_go').onclick = async () => {
       const v = id => $('#' + id).value.trim();
@@ -29,6 +29,7 @@ const Pages = {
       location.hash = 'registries'; App.boot();
     };
     $('#s_restore').onclick = () => IO.restorePicker();
+    $('#s_train').onclick = () => setTraining(true);
   },
   login() {
     document.body.className = '';
@@ -172,9 +173,9 @@ function newRegDialog() {
 /* ---------- КОНСТРУКТОР РЕГИСТРА ---------- */
 Routes.registry = async (main, id, tab = 'general') => {
   const reg = await DB.get('registries', id); if (!reg) return go('registries');
-  const ro = !can('design');
+  const ro = !can('design') || (typeof NET !== 'undefined' && NET.on && !regManage(reg));
   const tabs = { general: 'Общее', events: 'Формы событий', patient: 'Поля пациента', lists: 'Списки (реестры)', indicators: 'Показатели качества', proms: 'Опросники и расписание' };
-  main.innerHTML = `<div class="head"><h1>${esc(reg.name)}</h1><div class="row"><a class="btn" href="#patients/${reg.id}">Пациенты</a>${ro ? '' : '<button class="btn primary" id="rgSave">Сохранить</button>'}</div></div>
+  main.innerHTML = `<div class="head"><h1>${esc(reg.name)}</h1><div class="row"><a class="btn" href="#patients/${reg.id}">Пациенты</a>${TRAIN ? `<a class="btn" href="#training/${encodeURIComponent(reg.id)}">Учебные пациенты</a>` : ''}${ro ? '' : '<button class="btn primary" id="rgSave">Сохранить</button>'}</div></div>
     <div class="tabs">${Object.entries(tabs).map(([k, t]) => `<a href="#registry/${reg.id}/${k}" class="${k === tab ? 'on' : ''}">${t}</a>`).join('')}</div><div id="rgBody"></div>`;
   const body = $('#rgBody');
   let dirty = false; const mark = () => { dirty = true; const b = $('#rgSave'); if (b) b.classList.add('pulse'); };
@@ -429,13 +430,14 @@ Routes.patients = async (main, regId = '', listId = '') => {
   if ($('#regSel')) $('#regSel').onchange = e => go('patients/' + e.target.value);
   if (curList && curList.manual && can('enter')) $('.head .row', main).insertAdjacentHTML('afterbegin', '<button class="btn" id="lAdd">+ В список</button>');
   if ($('#lAdd')) $('#lAdd').onclick = async () => { const v = await pickValues('Добавить пациентов в список', patients.filter(p => p.registryId === regId).map(p => ({ v: p.id, l: p.localId + ' · ' + pname(p) })), curList.manual); if (v == null) return; curList.manual = v; await DB.put('registries', curReg, 'состав списка'); App.route(); };
+  if (TRAIN && curReg && !curList) $('.head .row', main)?.insertAdjacentHTML('beforeend', `<a class="btn" href="#training/${encodeURIComponent(curReg.id)}">Учебные пациенты</a>`);
   if ($('#newP')) $('#newP').onclick = () => patientDialog(null, regs, regId);
   if ($('#newPAI')) $('#newPAI').onclick = () => { const r = regs.find(x => x.id === regId) || regs[0]; if (!r) return toast('Сначала создайте регистр', 'err'); AI.fullParse(r, null); };
 };
 
 async function patientDialog(p, regs, regId) {
   if (!regs.length) return toast('Сначала создайте регистр', 'err');
-  const isNew = !p; p = p ? clone(p) : { registryId: regId || regs[0].id, data: {}, consent: '' };
+  const isNew = !p; p = p ? clone(p) : { registryId: regId || regs[0].id, center: Auth.user.center || '', data: {}, consent: '' };
   const reg = () => regs.find(r => r.id === $('#pd_reg', m).value) || regs[0];
   const m = modal(`<h2>${isNew ? 'Новый пациент' : 'Данные пациента'}</h2>
     <div class="grid">
@@ -486,7 +488,8 @@ async function patientDialog(p, regs, regId) {
     Object.assign(p, { registryId: reg().id, localId: v('pd_id'), lastName: v('pd_ln'), firstName: v('pd_fn'), middleName: v('pd_mn'), birthDate: v('pd_bd'), sex: v('pd_sx'), phone: v('pd_ph'), email: v('pd_em'), center: v('pd_ce'), consent: v('pd_cs'), idType: v('pd_idt'), iin: v('pd_iin'), funding: v('pd_fu'), promsConsent: v('pd_pc'), vital: v('pd_vs'), deathDate: v('pd_vs') === 'умер' ? v('pd_dd') : '', data: { ...(p.data || {}), ...readForm($('#pd_extra', m)) } });
     p.ids = $('#pd_ids', m).value.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const i = l.indexOf(':'); return i > 0 ? { type: l.slice(0, i).trim(), value: l.slice(i + 1).trim() } : { type: 'ID', value: l }; });
     if (!p.seq) p.seq = (await DB.all('patients')).reduce((mx, x) => Math.max(mx, x.seq || 0), 0) + 1;
-    const s = await DB.put('patients', p); m.close(); toast('Сохранено'); go('patient/' + s.id);
+    try { const saved = await DB.put('patients', p); m.close(); toast('Сохранено'); go('patient/' + saved.id); }
+    catch (error) { toast(error.message, 'err'); }
   };
 }
 
@@ -549,18 +552,23 @@ async function eventDialog(p, reg, ev) {
   const et = etById(reg, ev.type); const isNew = !ev.id; const ro = !isNew && (!can('edit') || ev.locked);
   const users = await Data.users();
   const m = modal(`<div class="row between"><div class="evhead" style="border-color:${et.color}"><h2>${esc(et.name)}</h2><div class="muted">${esc(pname(p))} · № ИБ ${esc(p.localId)}</div></div>${ro ? '' : '<button class="btn ai" id="evAI">✦ Заполнить из документа (ИИ)</button>'}</div>
-    <div class="row between"><div class="fld" style="max-width:260px"><label class="flab">${esc(et.dateLabel || 'Дата')} <i class="req">*</i></label><input class="inp" type="date" id="evDate" value="${esc(ev.date || today())}" ${ro ? 'disabled' : ''}></div><div class="row" id="evStatus"></div></div>
+    <div class="row between"><div class="fld" style="max-width:260px"><label class="flab">${esc(et.dateLabel || 'Дата')} <i class="req">*</i></label><input class="inp" type="date" id="evDate" value="${esc(ev.date || (ev.out30Due ? '' : today()))}" ${ro ? 'disabled' : ''}></div><div class="row" id="evStatus"></div></div>
+    ${ev.out30Due ? `<div class="fld"><label for="evOut30Checked" class="flab">Дата проверки исхода 30 дней</label><input class="inp" type="date" id="evOut30Checked" min="${esc(ev.out30Due)}" max="${today()}" value="${esc(ev.out30CheckedOn || '')}" ${ro ? 'disabled' : ''}><span class="fhint">Укажите дату, когда проверено, что исход известен как минимум до ${fmtDate(ev.out30Due)}.</span></div>` : ''}
     ${ev.locked ? '<div class="miss">Событие заблокировано после проверки. Изменения возможны только после разблокировки руководителем (с указанием причины).</div>' : ''}
     <div id="evForm"></div><div id="evQA"></div>
     <div class="row between sticky-bottom"><div>${!isNew && can('delete') ? '<button class="btn danger" id="evDel">Удалить событие</button>' : ''}</div>
     <div class="row"><span class="muted" id="evErr"></span>${ro ? '' : '<button class="btn" id="evDraft">Сохранить черновик</button><button class="btn primary" id="evSave">Сохранить</button>'}</div></div>`, { full: true });
   if (!isNew && !ro && ev.status === 'завершено' && !can('users')) { const d = $('#evDate', m); d.disabled = true; d.title = 'Дату сохранённой записи меняет администратор'; d.insertAdjacentHTML('afterend', ' <a href="javascript:void 0" class="small" id="evFix">запросить исправление</a>'); setTimeout(() => { const a = $('#evFix', m); if (a) a.onclick = () => correctionDialog(p, ev); }, 0); }
-  let read = renderEventForm($('#evForm', m), reg, p, et, ev.data || {}, ev.date || today(), users);
+  const formRoot = $('#evForm', m);
+  if (ro) formRoot.dataset.ro = '1';
+  const draftKey = ev.id || ('new-' + (ev.anchorEventId || ''));
+  let read = renderEventForm(formRoot, reg, p, et, ev.data || {}, ev.date || today(), users, draftKey);
   if ($('#evAI', m)) $('#evAI', m).onclick = () => AI.dialog({ title: `${et.name} (${reg.name})`, fields: formFields(et), users, dateLabel: et.dateLabel || 'Дата', onApply: (take, date, ow) => {
     const cur = read().data; const filled = [];
     Object.entries(take).forEach(([k, v]) => { if (ow || isEmpty(cur[k])) { cur[k] = v; filled.push(k); } });
     if (date && (ow || !ev.id)) $('#evDate', m).value = date;
-    read = renderEventForm($('#evForm', m), reg, p, et, cur, $('#evDate', m).value, users);
+    read = renderEventForm(formRoot, reg, p, et, cur, $('#evDate', m).value, users, draftKey);
+    read.saveAutosave?.();
     filled.forEach(k => $(`[data-wrap="${k}"]`, m)?.classList.add('ai-filled'));
     eventQA(m, p, reg, et, ev, () => App.route());
     toast(`ИИ заполнил полей: ${filled.length}. Проверьте подсвеченные.`);
@@ -572,10 +580,18 @@ async function eventDialog(p, reg, ev) {
     const { data, all } = read();
     const errs = validateEvent(et, all);
     if (errs.length && !draft) { $('#evErr', m).innerHTML = `<span class="bad">${esc(errs.slice(0, 3).join('; '))}${errs.length > 3 ? ` и ещё ${errs.length - 3}` : ''}</span>`; return toast('Есть незаполненные обязательные поля. Можно сохранить как черновик.', 'err'); }
-    const obj = { ...ev, patientId: p.id, registryId: reg.id, type: et.id, date, data, status: errs.length ? 'черновик' : 'завершено', schemaVersion: reg.version };
-    await DB.put('events', obj); rememberUsers(et, data); rememberOpts(et, data);
-    await Proms.autoSchedule(p, reg);
-    m.close(); toast(errs.length ? 'Черновик сохранён' : 'Сохранено'); App.route();
+    const { out30Due, ...record } = ev;
+    const check = $('#evOut30Checked', m);
+    if (check?.value && (check.value < out30Due || check.value > today())) return toast('Проверьте дату подтверждения исхода', 'err');
+    if (check) record.out30CheckedOn = check.value;
+    const obj = { ...record, patientId: p.id, registryId: reg.id, type: et.id, date, data, status: draft ? 'черновик' : 'завершено', schemaVersion: reg.version };
+    try { await DB.put('events', obj); }
+    catch (error) { return toast(error.message, 'err'); }
+    read.clearAutosave?.();
+    rememberUsers(et, data); rememberOpts(et, data);
+    try { await Proms.autoSchedule(p, reg); }
+    catch (error) { toast('Событие сохранено. Опросники не запланированы: ' + error.message, 'err'); }
+    m.close(); toast(draft ? 'Черновик сохранён' : 'Сохранено'); App.route();
   };
   if ($('#evSave', m)) $('#evSave', m).onclick = () => save(false);
   if ($('#evDraft', m)) $('#evDraft', m).onclick = () => save(true);
@@ -685,7 +701,7 @@ function userDialog(u) {
     else {
       if (u.id === Auth.user.id && v('u_r') !== 'admin' && !all.some(x => x.id !== u.id && x.role === 'admin' && x.active !== false)) return toast('Нельзя снять роль с последнего администратора', 'err');
       Object.assign(u, { name: v('u_n'), login: v('u_l'), role: v('u_r'), position: v('u_p'), code: v('u_c'), center: v('u_ce'), active: $('#u_a', m).value === '1' });
-      if ($('#u_pw', m).value) { if ($('#u_pw', m).value.length < 6) return toast('Пароль от 6 символов', 'err'); u.salt = uid('s'); u.pass = await hashPass($('#u_pw', m).value, u.salt); u.passChangedAt = nowISO(); }
+      if ($('#u_pw', m).value) { if ($('#u_pw', m).value.length < 6) return toast('Пароль от 6 символов', 'err'); await setUserPassword(u, $('#u_pw', m).value); }
       await DB.put('users', u);
     }
     m.close(); toast('Сохранено'); App.route();

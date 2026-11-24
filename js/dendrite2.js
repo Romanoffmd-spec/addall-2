@@ -147,6 +147,10 @@ profileDialog = async function (force) {
     <table class="tbl small"><tbody><tr><td>Логин</td><td><b>${esc(u.login)}</b></td></tr><tr><td>Учётная запись действует до</td><td><b>${u.expiresAt ? fmtDate(u.expiresAt) : 'бессрочно'}</b> ${ad ? '<button class="btn xs" id="exA" type="button">Продлить на ' + (ad >= 365 ? '12 месяцев' : ad + ' дней') + '</button>' : ''}</td></tr>
     <tr><td>Пароль действует до</td><td><b>${pe ? fmtDate(pe) : 'бессрочно'}</b> ${pd ? '<button class="btn xs" id="exP" type="button">Продлить пароль</button>' : ''}</td></tr><tr><td>Последний вход</td><td>${u.lastLogin ? fmtDT(u.lastLogin) : ''}</td></tr><tr><td>Роль</td><td>${esc(ROLES[u.role]?.name || '')}</td></tr></tbody></table>`);
   const save = async (msg) => { await DB.put('users', u, msg); toast(msg); m.close(); profileDialog(); };
+  if (typeof NET !== 'undefined' && NET.on && !can('users')) {
+    $('#exA', m)?.remove();
+    $('#exP', m)?.remove();
+  }
   if ($('#exA', m)) $('#exA', m).onclick = () => { u.expiresAt = addDays(today(), ad); save('Учётная запись продлена до ' + fmtDate(u.expiresAt)); };
   if ($('#exP', m)) $('#exP', m).onclick = () => { u.passChangedAt = nowISO(); save('Пароль продлён'); };
 };
@@ -179,8 +183,7 @@ Pages.login = async function (mode = 'login') {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return toast('Укажите рабочую почту', 'err');
     if (Settings.data.blockFreeMail !== false && FREE_MAIL.test(em)) return toast('Нужна рабочая почта учреждения, личные ящики не принимаются', 'err');
     if (ph && ph.value.trim() && !/^\+\d{10,15}$/.test(ph.value.trim())) return toast('Телефон в формате +77011234567, без пробелов', 'err');
-    const before = new Set((await DB.all('users')).map(u => u.id)); await orig();
-    const nu = (await DB.all('users')).find(u => !before.has(u.id)); if (nu) { nu.email = em; await DB.rawPut('users', nu); }
+    await orig();
   };
 };
 function infoMenu() {

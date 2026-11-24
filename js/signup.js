@@ -92,8 +92,14 @@ Pages.login = async function (mode = 'login') {
   if (mode === 'forgot') {
     $('#f_go').onclick = async () => {
       const lg = $('#f_login').value.trim().toLowerCase(); if (!lg) return toast('Введите логин', 'err');
-      const u = (await DB.all('users')).find(x => x.login.toLowerCase() === lg);
-      if (u) { u.resetReq = { at: nowISO(), contact: $('#f_cont').value.trim() }; await DB.rawPut('users', u); await DB.rawPut('audit', { id: uid('au_'), ts: nowISO(), user: u.id, userName: u.name, action: 'заявка на сброс пароля', store: 'users', recId: u.id }); }
+      const contact = $('#f_cont').value.trim();
+      if (typeof NET !== 'undefined' && NET.on) {
+        try { await NET.call('POST', 'request-reset', { login: lg, contact }); }
+        catch (error) { return toast(error.message, 'err'); }
+      } else {
+        const u = (await DB.all('users')).find(x => x.login?.toLowerCase() === lg);
+        if (u) { u.resetReq = { at: nowISO(), contact }; await DB.rawPut('users', u); await DB.rawPut('audit', { id: uid('au_'), ts: nowISO(), user: u.id, userName: u.name, action: 'заявка на сброс пароля', store: 'users', recId: u.id }); }
+      }
       toast('Заявка отправлена администратору'); Pages.login('login');
     };
   }
@@ -115,12 +121,13 @@ Pages.login = async function (mode = 'login') {
       if ($('#r_pw').value !== $('#r_pw2').value) return toast('Пароли не совпадают', 'err');
       if (!$('#r_ok').checked) return toast('Подтвердите обязательство о конфиденциальности', 'err');
       const all = await DB.all('users');
-      if (all.some(x => x.login.toLowerCase() === v('r_lg').toLowerCase())) return toast('Такой логин уже зарегистрирован', 'err');
-      const salt = uid('s');
-      const u = { id: uid('u_'), name: fullName(v('r_ln'), v('r_fn'), v('r_mn')), lastName: v('r_ln'), firstName: v('r_fn'), middleName: v('r_mn'), login: v('r_lg'), salt, pass: await hashPass($('#r_pw').value, salt), passChangedAt: nowISO(),
+      if (all.some(x => x.login?.toLowerCase() === v('r_lg').toLowerCase())) return toast('Такой логин уже зарегистрирован', 'err');
+      const u = { id: uid('u_'), name: fullName(v('r_ln'), v('r_fn'), v('r_mn')), lastName: v('r_ln'), firstName: v('r_fn'), middleName: v('r_mn'), login: v('r_lg'), email: v('r_em'),
         role, reqRole: role, position: pos, dept, resYear: v('r_yr'), resSpec: v('r_sp'), center: v('r_ce'), phone: v('r_ph'), orcid: v('r_or'), reqRegs: [], work: v('r_wk'), regAccess: [], note: v('r_cm'),
         code: '', active: false, status: 'pending', createdAt: nowISO(), agreedAt: nowISO() };
-      await DB.rawPut('users', u);
+      await setUserPassword(u, $('#r_pw').value);
+      try { await DB.rawPut('users', u); }
+      catch (error) { return toast(error.message, 'err'); }
       await DB.rawPut('audit', { id: uid('au_'), ts: nowISO(), user: u.id, userName: u.name, action: 'регистрация (заявка)', store: 'users', recId: u.id });
       Pages.login('wait');
     };
@@ -168,7 +175,7 @@ Routes.admin = async (main) => {
   $('#st_self').onchange = async () => { Settings.data.selfReg = $('#st_self').checked; await Settings.save(); toast(Settings.data.selfReg ? 'Саморегистрация включена' : 'Саморегистрация выключена'); };
   $$('[data-ua]').forEach(b => b.onclick = () => userDialog(users.find(u => u.id === b.dataset.ua), true));
   $$('[data-ux]').forEach(b => b.onclick = async () => { const u = users.find(x => x.id === b.dataset.ux); const why = await promptBox('Причина отказа (необязательно)'); if (why === null) return; u.status = 'rejected'; u.active = false; u.rejectNote = why || ''; await DB.put('users', u, 'заявка отклонена'); toast('Заявка отклонена'); App.route(); });
-  $$('[data-urs]').forEach(b => b.onclick = async () => { const u = users.find(x => x.id === b.dataset.urs); const p = await promptBox('Временный пароль для ' + u.name + ' (от 8 символов). Передайте его лично.'); if (!p) return; if (p.length < 8) return toast('Минимум 8 символов', 'err'); u.salt = uid('s'); u.pass = await hashPass(p, u.salt); u.passChangedAt = nowISO(); u.mustChange = true; delete u.resetReq; await DB.put('users', u, 'сброс пароля'); toast('Пароль задан'); App.route(); });
+  $$('[data-urs]').forEach(b => b.onclick = async () => { const u = users.find(x => x.id === b.dataset.urs); const p = await promptBox('Временный пароль для ' + u.name + ' (от 8 символов). Передайте его лично.'); if (!p) return; if (p.length < 8) return toast('Минимум 8 символов', 'err'); await setUserPassword(u, p); u.mustChange = true; delete u.resetReq; await DB.put('users', u, 'сброс пароля'); toast('Пароль задан'); App.route(); });
   $$('[data-urx]').forEach(b => b.onclick = async () => { const u = users.find(x => x.id === b.dataset.urx); delete u.resetReq; await DB.put('users', u); App.route(); });
   $$('[data-ue]').forEach(b => b.onclick = () => userDialog(users.find(u => u.id === b.dataset.ue)));
 };
@@ -217,7 +224,7 @@ userDialog = async function (u, approving) {
       Object.assign(u, extra);
       if (approving) { u.status = 'active'; u.active = true; u.approvedBy = Auth.user.id; u.approvedAt = nowISO(); }
       else { u.active = $('#u_a', m).value === '1'; if (u.active && u.status !== 'active') u.status = 'active'; }
-      if ($('#u_pw', m).value) { if ($('#u_pw', m).value.length < 6) return toast('Пароль от 6 символов', 'err'); u.salt = uid('s'); u.pass = await hashPass($('#u_pw', m).value, u.salt); u.passChangedAt = nowISO(); }
+      if ($('#u_pw', m).value) { if ($('#u_pw', m).value.length < 6) return toast('Пароль от 6 символов', 'err'); await setUserPassword(u, $('#u_pw', m).value); }
       await DB.put('users', u, approving ? 'заявка подтверждена' : undefined);
       if (u.id === Auth.user.id) Object.assign(Auth.user, u);
     }
@@ -248,14 +255,27 @@ async function profileDialog(force) {
     </div>
     <div class="row end"><button class="btn primary" id="p_ok">Сохранить</button></div>`, { wide: true });
   bindDept(m, 'p_dep'); bindPos(m, 'p_pos');
+  if (typeof NET !== 'undefined' && NET.on && !can('users')) {
+    for (const field of ['p_dep', 'p_dep__org']) {
+      const input = $('#' + field, m);
+      if (input) { input.disabled = true; input.title = 'Отделение и учреждение меняет администратор'; }
+    }
+  }
   $('#p_ok', m).onclick = async () => {
     const v = id => ($('#' + id, m)?.value || '').trim();
     const name = fullName(v('p_ln'), v('p_fn'), v('p_mn')); if (!name) return toast('Укажите ФИО', 'err');
     if ($('#p_new', m).value || force) {
-      if (!(await checkOwnPass(u, $('#p_old', m).value))) return toast('Текущий пароль неверный', 'err');
-      if ($('#p_new', m).value.length < 8 || passScore($('#p_new', m).value) < 2) return toast('Новый пароль: минимум 8 символов, буквы и цифры', 'err');
-      if ($('#p_new', m).value !== $('#p_new2', m).value) return toast('Пароли не совпадают', 'err');
-      u.salt = uid('s'); u.pass = await hashPass($('#p_new', m).value, u.salt); u.passChangedAt = nowISO(); delete u.mustChange;
+      const oldPass = $('#p_old', m).value, newPass = $('#p_new', m).value;
+      if (newPass.length < 8 || passScore(newPass) < 2) return toast('Новый пароль: минимум 8 символов, буквы и цифры', 'err');
+      if (newPass !== $('#p_new2', m).value) return toast('Пароли не совпадают', 'err');
+      if (typeof NET !== 'undefined' && NET.on) {
+        try { await NET.changePassword(u, oldPass, newPass); }
+        catch (error) { return toast(error.message, 'err'); }
+      } else {
+        if (!(await checkOwnPass(u, oldPass))) return toast('Текущий пароль неверный', 'err');
+        await setUserPassword(u, newPass);
+        delete u.mustChange;
+      }
     }
     Object.assign(u, { name, lastName: v('p_ln'), firstName: v('p_fn'), middleName: v('p_mn'), dept: readDept(m, 'p_dep'), position: readPos(m, 'p_pos'), phone: v('p_ph'), orcid: v('p_or'), about: v('p_ab') });
     await DB.put('users', u, 'профиль'); m.close(); toast('Профиль сохранён'); App.boot();
@@ -280,6 +300,12 @@ const SCOPES = { dept: 'Только отделение-владелец (по �
 const ACCESS_WHY = { admin: 'администратор', owner: 'создатель', member: 'участник', grant: 'выдан администратором', center: 'всё учреждение', dept: 'своё отделение' };
 async function requestRegAccess(r) {
   const note = await promptBox('Запрос доступа к «' + r.name + '». Зачем нужен доступ (проект, коллаборация)?'); if (note === null) return;
+  if (typeof NET !== 'undefined' && NET.on) {
+    try { await NET.call('POST', 'registry-access', { registryId: r.id, note }); }
+    catch (error) { return toast(error.message, 'err'); }
+    toast('Запрос отправлен владельцу регистра'); App.route();
+    return;
+  }
   const all = await DB.all('registries'); const reg = all.find(x => x.id === r.id);
   reg.requests = (reg.requests || []).filter(q => !(q.userId === Auth.user.id && q.status === 'ждёт'));
   reg.requests.push({ id: uid('rq_'), userId: Auth.user.id, at: nowISO(), note: note || '', status: 'ждёт' });

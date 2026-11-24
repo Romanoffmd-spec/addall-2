@@ -9,24 +9,30 @@ const NA_REASONS = { unk: 'неизвестно', na: 'не применимо',
 
 {
   const _render = renderEventForm;
-  renderEventForm = function (root, reg, patient, et, data, eventDate, users) {
+  const bindings = new WeakMap();
+  renderEventForm = function (root, reg, patient, et, data, eventDate, users, eventKey) {
+    bindings.get(root)?.abort();
+    const controller = new AbortController();
+    bindings.set(root, controller);
+    const { signal } = controller;
     let read = _render(root, reg, patient, et, data, eventDate, users);
-    /* 2.11: автосохранение несохранённого ввода в этом браузере (на случай закрытия окна или сбоя) */
-    const AK = 'addall2.autosave.' + (Auth.user?.id || '') + '.' + (patient?.id || 'new') + '.' + (et?.id || '');
-    let tmr = null; const saveLocal = () => { clearTimeout(tmr); tmr = setTimeout(() => { try { localStorage.setItem(AK, JSON.stringify({ at: nowISO(), data: readForm(root) })); } catch (e) { } }, 800); };
-    try {
-      const prev = JSON.parse(localStorage.getItem(AK) || 'null');
-      if (prev && prev.data && JSON.stringify(prev.data) !== JSON.stringify(Object.fromEntries(Object.entries(data || {}).filter(([k]) => k !== '_na'))) && Object.values(prev.data).some(v => !isEmpty(v)) && !root.dataset.ro) {
-        const bar = document.createElement('div'); bar.className = 'card warn autosave-bar';
-        bar.innerHTML = `Есть несохранённый ввод от ${fmtDT(prev.at)}. <button type="button" class="btn xs primary" data-as="1">Восстановить</button> <button type="button" class="btn xs" data-as="0">Удалить</button>`;
-        root.prepend(bar);
-        bar.onclick = (e) => { const b = e.target.closest('[data-as]'); if (!b) return; e.stopPropagation();
-          if (b.dataset.as === '1') { read = _render(root, reg, patient, et, { ...(data || {}), ...prev.data }, eventDate, users); decorate(); toast('Ввод восстановлен, проверьте и сохраните'); }
-          else { try { localStorage.removeItem(AK); } catch (x) { } bar.remove(); } };
-      }
-    } catch (e) { }
-    root.addEventListener('input', saveLocal); root.addEventListener('change', saveLocal);
+    if (root.dataset.ro) return read;
     const na = { ...((data && data._na) || {}) };
+    const autosaveKey = eventKey && ['addall2', 'autosave', TRAIN ? 'train' : 'main', Auth.user?.id, reg.id, patient.id, et.id, eventKey].join('.');
+    const dialog = root.closest('.modal');
+    const dateInput = dialog?.querySelector('#evDate');
+    const checkedInput = dialog?.querySelector('#evOut30Checked');
+    const storage = () => typeof NET !== 'undefined' && NET.on ? sessionStorage : localStorage;
+    const current = () => ({ data: { ...readForm(root), _na: { ...na } }, date: dateInput?.value, checkedOn: checkedInput?.value });
+    const initial = JSON.stringify(current());
+    const saveLocal = () => {
+      if (!autosaveKey) return;
+      try { storage().setItem(autosaveKey, JSON.stringify({ at: nowISO(), ...current() })); } catch (e) { }
+    };
+    if (autosaveKey) {
+      dateInput?.addEventListener('change', saveLocal, { signal });
+      checkedInput?.addEventListener('change', saveLocal, { signal });
+    }
     const fields = formFields(et).filter(f => f.type !== 'calc' && f.type !== 'yesno' && (f.required || f.key_));
     const paint = (w, k) => {
       const r = na[k]; let chip = w.querySelector('.na-chip');
@@ -44,22 +50,61 @@ const NA_REASONS = { unk: 'неизвестно', na: 'не применимо',
         const pop = document.createElement('div'); pop.className = 'na-pop'; pop.setAttribute('role', 'menu');
         pop.innerHTML = Object.entries(NA_REASONS).map(([k, t]) => `<button type="button" role="menuitem" data-na="${k}" class="${na[f.key] === k ? 'on' : ''}">${t}</button>`).join('') + (na[f.key] ? '<button type="button" role="menuitem" data-na="">снять отметку</button>' : '');
         w.appendChild(pop); const first = pop.querySelector('button'); if (first) first.focus();
-        pop.onclick = (ev) => { const x = ev.target.closest('[data-na]'); if (!x) return; ev.stopPropagation(); if (x.dataset.na) { na[f.key] = x.dataset.na; /* значение и причина пропуска не могут быть одновременно: поле очищается */ w.querySelectorAll('[data-k]').forEach(el => { if (el.matches('input:not([type=radio]):not([type=checkbox]),select,textarea')) el.value = ''; }); w.querySelectorAll('input[type=radio],input[type=checkbox]').forEach(i => { i.checked = false; }); root.dispatchEvent(new Event('input')); } else delete na[f.key]; pop.remove(); paint(w, f.key); b.focus(); };
+        pop.onclick = (ev) => { const x = ev.target.closest('[data-na]'); if (!x) return; ev.stopPropagation(); if (x.dataset.na) { na[f.key] = x.dataset.na; /* значение и причина пропуска не могут быть одновременно: поле очищается */ w.querySelectorAll('[data-k]').forEach(el => { if (el.matches('input:not([type=radio]):not([type=checkbox]),select,textarea')) el.value = ''; }); w.querySelectorAll('input[type=radio],input[type=checkbox]').forEach(i => { i.checked = false; }); root.dispatchEvent(new Event('input')); } else delete na[f.key]; pop.remove(); paint(w, f.key); saveLocal(); b.focus(); };
         pop.onkeydown = (ev) => { if (ev.key === 'Escape') { ev.stopPropagation(); pop.remove(); b.focus(); } };
       };
       lab.appendChild(b); paint(w, f.key);
     });
     decorate();
-    /* ввели значение: отметка о пропуске снимается */
-    root.addEventListener('input', (e) => { const w = e.target.closest && e.target.closest('[data-wrap]'); if (w && na[w.dataset.wrap]) { delete na[w.dataset.wrap]; paint(w, w.dataset.wrap); } });
-    root.addEventListener('change', (e) => { const w = e.target.closest && e.target.closest('[data-wrap]'); if (w && na[w.dataset.wrap] && !e.target.closest('.na-pop')) { delete na[w.dataset.wrap]; paint(w, w.dataset.wrap); } });
-    return function () {
-      clearTimeout(tmr); try { localStorage.removeItem(AK); } catch (e) { }
-      const r = read(); const keep = {};
-      Object.entries(na).forEach(([k, v]) => { if (isEmpty(r.data[k])) keep[k] = v; });
-      if (Object.keys(keep).length) r.data._na = keep; else delete r.data._na;
+    const onChange = e => {
+      const w = e.target.closest?.('[data-wrap]');
+      if (w && na[w.dataset.wrap] && !isEmpty(readForm(root)[w.dataset.wrap])) {
+        delete na[w.dataset.wrap];
+        paint(w, w.dataset.wrap);
+      }
+      saveLocal();
+    };
+    root.addEventListener('input', onChange, { signal });
+    root.addEventListener('change', onChange, { signal });
+
+    try {
+      const saved = autosaveKey && JSON.parse(storage().getItem(autosaveKey) || 'null');
+      if (saved?.data && JSON.stringify({ data: saved.data, date: saved.date, checkedOn: saved.checkedOn }) !== initial) {
+        const bar = document.createElement('div');
+        bar.className = 'card warn autosave-bar';
+        bar.innerHTML = `Есть несохранённый ввод от ${fmtDT(saved.at)}. <button type="button" class="btn xs primary" data-as="1">Восстановить</button> <button type="button" class="btn xs" data-as="0">Удалить</button>`;
+        root.prepend(bar);
+        bar.onclick = e => {
+          const button = e.target.closest('[data-as]');
+          if (!button) return;
+          e.stopPropagation();
+          if (button.dataset.as === '0') {
+            try { storage().removeItem(autosaveKey); } catch (error) { }
+            bar.remove();
+            return;
+          }
+          for (const key of Object.keys(na)) delete na[key];
+          Object.assign(na, saved.data._na || {});
+          if (dateInput && saved.date !== undefined) dateInput.value = saved.date;
+          if (checkedInput && saved.checkedOn !== undefined) checkedInput.value = saved.checkedOn;
+          read = _render(root, reg, patient, et, { ...(data || {}), ...saved.data }, dateInput?.value || eventDate, users);
+          decorate();
+          toast('Ввод восстановлен, проверьте и сохраните');
+        };
+      }
+    } catch (error) { }
+
+    const result = () => {
+      const r = read();
+      const keep = Object.fromEntries(Object.entries(na).filter(([key]) => isEmpty(r.data[key])));
+      if (Object.keys(keep).length) { r.data._na = keep; r.all._na = keep; }
       return r;
     };
+    result.saveAutosave = saveLocal;
+    result.clearAutosave = () => {
+      if (autosaveKey) try { storage().removeItem(autosaveKey); } catch (error) { }
+    };
+    return result;
   };
 }
 

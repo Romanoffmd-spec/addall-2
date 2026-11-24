@@ -5,36 +5,82 @@
 
 const Out30 = {
   DAYS: 30,
-  /* форма исхода: из настройки регистра или по признаку "30 дней" в названии раздела или поля */
-  outType(reg) {
-    if (reg.keyDates?.out30) return etById(reg, reg.keyDates.out30) || null;
-    const start = reg.keyDates?.start;
-    return (reg.eventTypes || []).find(et => et.id !== start && ((et.sections || []).some(s => /30\s*дн/i.test(s.title || '')) || formFields(et).some(f => /30/.test(f.key) || /30\s*дн/i.test(f.label || '')))) || null;
+  startType(reg) {
+    return reg.keyDates?.out30Start || etById(reg, 'surgery')?.id || reg.keyDates?.start;
   },
-  /* ключевые поля формы исхода: обязательные и желательные */
-  keyFields(et) { return formFields(et).filter(f => (f.required || f.key_) && f.type !== 'calc'); },
-  addDays(d, n) { const x = new Date(d + 'T00:00:00'); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); },
+  form(reg, start) {
+    const events = reg.eventTypes || [];
+    const sections30 = et => (et?.sections || []).filter(s => /30\s*дн/i.test(s.title || ''));
+    const fields30 = et => formFields(et).some(f => /30$/.test(f.key) || /30\s*дн/i.test(f.label || ''));
+    const explicit = reg.keyDates?.out30;
+    const template = explicit
+      ? etById(reg, explicit)
+      : events.find(et => et.id !== start && (sections30(et).length || fields30(et)))
+        || events.find(et => et.id === start && sections30(et).length);
+    if (!template) return null;
+    const sections = sections30(template);
+    const fields = sections.length ? sections.flatMap(s => s.fields || []) : formFields(template);
+    return { type: template, inline: template.id === start, fields: fields.filter(f => (f.required || f.key_) && f.type !== 'calc') };
+  },
+
+  match(operations, outcomes) {
+    const byOperation = new Map();
+    const byPatient = new Map();
+    const operationsById = new Map();
+    for (const item of operations) {
+      operationsById.set(item.id, item);
+      if (!byPatient.has(item.patientId)) byPatient.set(item.patientId, []);
+      byPatient.get(item.patientId).push(item);
+    }
+    for (const list of byPatient.values()) list.sort((a, b) => b.date.localeCompare(a.date));
+    for (const outcome of outcomes) {
+      let operation;
+      if (outcome.anchorEventId) operation = operationsById.get(outcome.anchorEventId);
+      else if (outcome.date) {
+        const candidates = byPatient.get(outcome.patientId) || [];
+        const index = candidates.findIndex(item => item.date <= outcome.date);
+        if (index >= 0 && candidates[index + 1]?.date !== candidates[index].date) operation = candidates[index];
+      }
+      if (!operation || operation.patientId !== outcome.patientId) continue;
+      const other = byOperation.get(operation.id);
+      const rank = item => (item.anchorEventId ? 4 : 0) + (item.out30CheckedOn ? 2 : 0) + (item.status === 'черновик' ? 0 : 1);
+      if (!other || rank(outcome) > rank(other)
+        || (rank(outcome) === rank(other) && (outcome.out30CheckedOn || outcome.date || '') > (other.out30CheckedOn || other.date || ''))) {
+        byOperation.set(operation.id, outcome);
+      }
+    }
+    return byOperation;
+  },
 
   async build() {
     const [regs, patients, events] = await Promise.all([Data.registries(), Data.patients(), Data.events()]);
     const t0 = today(), out = [];
-    regs.forEach(reg => {
-      const start = reg.keyDates?.start; const st = start && etById(reg, start); if (!st) return;
-      const ot = this.outType(reg); const kf = ot ? this.keyFields(ot) : [];
-      events.filter(e => e.registryId === reg.id && e.type === start && e.date).forEach(e => {
-        const p = patients.find(x => x.id === e.patientId); if (!p || (typeof visibleP === 'function' && !visibleP(p))) return;
-        const due = this.addDays(e.date, this.DAYS);
-        const outs = ot ? events.filter(x => x.patientId === p.id && x.type === ot.id && (!x.date || x.date >= e.date)) : [];
-        const o = outs.sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))[0];
+    const patientById = new Map(patients.map(p => [p.id, p]));
+    for (const reg of regs) {
+      const start = this.startType(reg);
+      if (!start || !etById(reg, start)) continue;
+      const form = this.form(reg, start);
+      const registryEvents = events.filter(e => e.registryId === reg.id);
+      const operations = registryEvents.filter(e => e.type === start && e.date && e.status !== 'черновик');
+      const matched = form && !form.inline ? this.match(operations, registryEvents.filter(e => e.type === form.type.id)) : null;
+      for (const e of operations) {
+        const p = patientById.get(e.patientId);
+        if (!p || (typeof visibleP === 'function' && !visibleP(p))) continue;
+        const due = addDays(e.date, this.DAYS);
+        const o = form?.inline ? e : matched?.get(e.id);
+        const checked = o?.out30CheckedOn || '';
         let state, miss = [];
-        if (!ot) state = 'noform';
-        else if (o) {
-          const v = computeValues(reg, p, ot, o.data, o.date); miss = kf.filter(f => condOK(f.showIf, v) && isEmpty(v[f.key]) && !(v._na && v._na[f.key]));
-          state = o.status === 'черновик' || miss.length ? 'partial' : 'done';
-        } else state = t0 < due ? 'wait' : 'due';
-        out.push({ reg, p, e, ot, o, due, state, miss, late: Math.max(0, daysBetween(due, t0)) });
-      });
-    });
+        if (!form) state = 'noform';
+        else if (t0 < due) state = 'wait';
+        else if (!o) state = 'due';
+        else {
+          const v = computeValues(reg, p, form.type, o.data, o.date);
+          miss = form.fields.filter(f => condOK(f.showIf, v) && isEmpty(v[f.key]) && v._na?.[f.key] !== 'na');
+          state = o.status === 'черновик' || miss.length || checked < due || checked > t0 ? 'partial' : 'done';
+        }
+        out.push({ reg, p, e, ot: form?.type, o, due, state, miss, checked, late: Math.max(0, daysBetween(due, t0)) });
+      }
+    }
     return out;
   },
   async badge() { try { return (await this.build()).filter(x => x.state === 'due' || x.state === 'partial').length; } catch (e) { return 0; } }
@@ -57,11 +103,16 @@ Routes.out30 = async (main) => {
         <td><a href="#patient/${x.p.id}"><b>${esc(pname(x.p))}</b></a><div class="muted small">ID ${x.p.seq || ''}${x.p.localId ? ' · № ' + esc(x.p.localId) : ''}${x.p.vital === 'умер' ? ' · умер' : ''}</div></td>
         <td>${esc(x.reg.name)}</td><td>${fmtDate(x.e.date)}</td><td>${fmtDate(x.due)}${x.state === 'due' && x.late ? `<div class="bad small">просрочено на ${x.late} дн.</div>` : x.state === 'wait' ? `<div class="muted small">через ${daysBetween(today(), x.due)} дн.</div>` : ''}</td>
         <td><span class="tag ${cls[x.state]}">${lab[x.state]}</span></td>
-        <td class="small">${x.miss.length ? esc(x.miss.map(f => f.label).join(', ')) : x.o && x.o.status === 'черновик' ? 'черновик' : ''}</td>
-        <td>${x.ot && can('enter') && x.state !== 'done' ? `<button class="btn xs primary" data-fill="${x.e.id}">${x.o ? 'Дополнить' : 'Заполнить'}</button>` : ''}</td></tr>`).join('')}</tbody></table>` : emptyState(st.f === 'todo' ? 'Все исходы 30 дней заполнены.' : 'Нет операций в этом списке.')}
-        <p class="muted small" style="margin-top:10px">Операция берётся из точки отсчёта регистра. Форма исхода: указанная в настройке регистра или форма с разделом «30 дней». Полной считается форма без статуса «черновик», где заполнены обязательные и желательные поля.</p></div>`;
+        <td class="small">${x.miss.length ? esc(x.miss.map(f => f.label).join(', ')) : x.o && x.o.status === 'черновик' ? 'черновик' : x.state === 'partial' ? 'укажите дату проверки исхода' : ''}</td>
+        <td>${x.ot && x.state !== 'done' && (x.o ? can('edit') && !x.o.locked : can('enter')) ? `<button class="btn xs primary" data-fill="${x.e.id}">${x.o ? 'Дополнить' : 'Заполнить'}</button>` : ''}</td></tr>`).join('')}</tbody></table>` : emptyState(st.f === 'todo' ? 'Все исходы 30 дней заполнены.' : 'Нет операций в этом списке.')}
+        <p class="muted small" style="margin-top:10px">Операция берётся из точки отсчёта регистра. Форма исхода: указанная в настройке регистра или форма с разделом «30 дней». Заполненные исходы требуют отметки о проверке на 30-й день или позднее. Дата выписки сама по себе не подтверждает наблюдение.</p></div>`;
     $$('[data-f]', main).forEach(b => b.onclick = () => { st.f = b.dataset.f; draw(); });
-    $$('[data-fill]', main).forEach(b => b.onclick = async () => { const x = all.find(y => y.e.id === b.dataset.fill); if (!x) return; await eventDialog(x.p, x.reg, x.o || { type: x.ot.id, date: x.due <= today() ? x.due : today() }); });
+    $$('[data-fill]', main).forEach(b => b.onclick = async () => {
+      const x = all.find(y => y.e.id === b.dataset.fill);
+      if (!x) return;
+      const outcome = x.o || { type: x.ot.id, date: '' };
+      await eventDialog(x.p, x.reg, { ...outcome, out30Due: x.due, ...(x.ot.id !== x.e.type ? { anchorEventId: x.e.id } : {}) });
+    });
   };
   draw();
 };
