@@ -38,7 +38,19 @@ if (NET.on) {
   };
   Object.assign(DB, {
     async open() { await NET.call('GET', 'ping'); this.db = { server: true }; },
-    async all(store) { return (await NET.call('GET', 's/' + store) || []).map(NET.dec); },
+    /* догрузка изменений: первый раз список целиком, дальше только записи, изменённые после последнего ответа сервера */
+    async all(store) {
+      const tok = NET.token();
+      if (NET._cacheTok !== tok) { NET._cache = new Map(); NET._cacheTok = tok; }
+      const c = NET._cache.get(store);
+      const r = await NET.call('GET', 's/' + store + (c ? `?since=${c.seq}&scope=${encodeURIComponent(c.scope)}` : '?since=0&scope='));
+      if (!r || !Array.isArray(r.rows)) return (Array.isArray(r) ? r : []).map(NET.dec);
+      const map = c && !r.full ? c.map : new Map();
+      for (const id of r.deleted || []) map.delete(id);
+      for (const o of r.rows) map.set(o.id, NET.dec(o));
+      if (NET._cacheTok === tok) NET._cache.set(store, { seq: r.seq, scope: r.scope, map });
+      return [...map.values()].map(o => structuredClone(o));
+    },
     async get(store, id) { if (id == null) return undefined; const o = await NET.call('GET', 's/' + store + '/' + encodeURIComponent(id)); return o ? NET.dec(o) : undefined; },
     async rawPut(store, obj) {
       if (store === 'audit' && !NET.token()) return;

@@ -498,3 +498,19 @@ if (typeof EN === 'object') Object.assign(EN, {
   'Честные данные': 'Honest data', 'результатах лечения': 'treatment outcomes', 'Единый набор полей': 'One dataset for all',
   'Аналитика и отчёты': 'Analytics and reports', 'Доступ по ролям': 'Role-based access'
 });
+
+/* ---------- 11. Широкие таблицы прокручиваются внутри своей рамки, страница и окна не сдвигаются вбок (планшет, телефон) ---------- */
+(() => {
+  const wrapTables = (root) => {
+    root.querySelectorAll?.('table').forEach(t => {
+      const p = t.parentElement;
+      if (!p || p.classList.contains('tbl-scroll') || t.closest('.tbl-scroll') || getComputedStyle(p).overflowX === 'auto' || getComputedStyle(p).overflowX === 'scroll') return;
+      const w = document.createElement('div'); w.className = 'tbl-scroll';
+      p.insertBefore(w, t); w.appendChild(t);
+    });
+  };
+  let queued = false;
+  const run = () => { queued = false; wrapTables(document.body); };
+  new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(run); } }).observe(document.documentElement, { childList: true, subtree: true });
+  if (document.body) run(); else document.addEventListener('DOMContentLoaded', run);
+})();
