@@ -616,3 +616,21 @@ html:has(> body.shell){overflow:hidden;overscroll-behavior:none}
 .pr-checks li{padding:6px 10px;border-radius:8px;margin:4px 0;background:var(--surface-2)}
 .pr-checks li.okt{color:var(--ok, #1a7f45)}
 .pr-checks li.warnt{color:var(--warn-ink, #9a5b00)}
+
+/* ---------- Окна на планшетах и телефонах: высота по видимой области (Safari iPad прячет низ при 100vh), без бокового сдвига ---------- */
+html:has(.modal-wrap){overflow:hidden}
+.modal-wrap{overscroll-behavior:contain;max-width:100vw}
+.modal{min-width:0;overflow-x:auto;overscroll-behavior:contain}
+.modal.sheet{overflow-x:hidden;overflow-x:clip;touch-action:pan-y;height:calc(100vh - 20px);height:calc(100dvh - 20px);max-height:calc(100dvh - 20px)}
+.modal.sheet>*{min-width:0;max-width:100%}
+.modal.sheet>.sheet-h,.modal.sheet>.sheet-act{max-width:none}
+.modal.full{min-height:100dvh}
+.modal-wrap.sheet-wrap{height:100vh;height:100dvh}
+.modal.sheet>.sheet-act{padding-bottom:max(14px,env(safe-area-inset-bottom))}
+@media (max-width:700px){.modal.sheet{height:100dvh;max-height:100dvh}}
+@supports (height:100dvh){body.shell,body.shell.aa-sb{height:100dvh}.auth{min-height:100dvh}.training-callout{max-height:calc(100dvh - 24px)}}
+/* широкие таблицы и длинное содержимое не сдвигают страницу вбок */
+.tbl-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+.tbl-scroll>table{margin:0}
+main{overflow-x:hidden;overflow-x:clip}
+main .card,main .row,main .fld,main .inp{min-width:0;max-width:100%}
