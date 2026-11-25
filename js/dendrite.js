@@ -292,10 +292,20 @@ async function seedTraining() {
   if (!(await DB.get('settings', 'main'))) {
     await DB.rawPut('settings', { id: 'main', center: TRAIN_USER.center, department: TRAIN_USER.dept, centers: [TRAIN_USER.center], departments: [TRAIN_USER.dept], anonCodes: true });
   }
+  /* учебный колоректальный регистр: сроки ожидаемых форм, чтобы очередь наблюдения и полнота были видны на примере */
+  const trainingSchedule = reg => {
+    const set = (id, x) => { const et = (reg.eventTypes || []).find(e => e.id === id); if (et && !et.expect) et.expect = x; };
+    set('path', { days: 30, mode: 'by' }); set('followup', { days: 90, every: 90, window: 45 });
+    return reg;
+  };
+  const example = await DB.get('registries', 'training-example');
+  if (example && !example.trainingScheduleSet && !(example.eventTypes || []).some(et => et.expect)) await DB.rawPut('registries', { ...trainingSchedule(example), trainingScheduleSet: true });
   if ((await DB.all('registries')).length) return;
   try { await addTrainingSchemas(DB.db, await loadTrainingSource()); } catch (error) { }
   if (!(await DB.all('registries')).length) {
     const sample = TEMPLATES.colorectal.make();
+    trainingSchedule(sample);
+    sample.trainingScheduleSet = true;
     Object.assign(sample, { id: 'training-example', name: 'Учебный колоректальный регистр', createdBy: TRAIN_USER.id, center: TRAIN_USER.center, dept: TRAIN_USER.dept, status: 'активен' });
     await DB.rawPut('registries', sample);
   }
