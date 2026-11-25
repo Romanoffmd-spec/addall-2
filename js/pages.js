@@ -719,7 +719,7 @@ async function eventDialog(p, reg, ev) {
   }
   const draftKey = ev.id || ('new-' + (ev.anchorEventId || ''));
   const dateInput = $('#evDate', m);
-  const aiDraft = { evidence: { ...(ev.aiEvidence || {}) }, defaultDate: !ev.date && !ev.out30Due };
+  const aiDraft = { evidence: { ...(ev.aiEvidence || {}) }, proposed: {}, defaultDate: !ev.date && !ev.out30Due };
   dateInput.addEventListener('input', () => { aiDraft.defaultDate = false; });
   dateInput.addEventListener('change', () => { aiDraft.defaultDate = false; });
   let read = renderEventForm(formRoot, formRegistry, p, et, ev.data || {}, ev.date || today(), users, draftKey, aiDraft);
@@ -746,6 +746,7 @@ async function eventDialog(p, reg, ev) {
       if (!overwrite && !isEmpty(cur[key])) continue;
       cur[key] = value;
       filled.push(key);
+      aiDraft.proposed[key] = value;
       if (evidence[key]) aiDraft.evidence[key] = evidence[key];
       else delete aiDraft.evidence[key];
     }
@@ -782,6 +783,8 @@ async function eventDialog(p, reg, ev) {
       if (external.value.trim()) record.externalEncounterId = external.value.trim();
       else delete record.externalEncounterId;
     }
+    /* учёт точности автозаполнения: что ИИ предложил и что врач сохранил */
+    if (!draft && typeof AIQuality === 'object') AIQuality.review(record, data, aiDraft);
     const aiEvidence = AI.matchingEvidence(data, aiDraft.evidence);
     if (Object.keys(aiEvidence).length) record.aiEvidence = aiEvidence;
     else delete record.aiEvidence;

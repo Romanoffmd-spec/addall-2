@@ -288,7 +288,7 @@ Object.assign(ROUTE_GROUP, { aicheck: 'Работа', regsummary: 'Работа'
     const groups = await previous();
     const work = groups.find(g => g.id === 'work'), sci = groups.find(g => g.id === 'sci');
     if (work?.items && can('enter') && !work.items.some(x => x && x.r === 'regsummary')) work.items.unshift({ r: 'regsummary', t: 'Сводка регистра', i: '◉' });
-    if (work?.items && (can('query') || can('edit')) && !work.items.some(x => x && x.r === 'aicheck')) work.items.push({ r: 'aicheck', t: 'ИИ-сверка с документами', i: '✓' });
+    if (work?.items && (can('query') || can('edit')) && !routeOff('aicheck') && !work.items.some(x => x && x.r === 'aicheck')) work.items.push({ r: 'aicheck', t: 'ИИ-сверка с документами', i: '✓' });
     if (sci?.items && can('analyse') && !sci.items.some(x => x && x.r === 'ideas')) sci.items.push({ r: 'ideas', t: 'Идеи для исследований', i: '✦' });
     return groups;
   };

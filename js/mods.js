@@ -12,7 +12,7 @@ const MODULES = {
   trials: { n: 'Исследования и рандомизация', d: 'Клинические исследования, скрининг, рандомизация.', r: ['trials', 'trial'] },
   writing: { n: 'Рукописи и литература', d: 'Черновики статей и библиотека ссылок.', r: ['writing', 'library'] },
   docs: { n: 'Документы по шаблонам', d: 'Выписки и письма из данных пациента.', r: ['doctpl'] },
-  ai: { n: 'ИИ-ассистент', d: 'Заполнение из документов, брифинги, помощник. Требует настройки модели.', r: [] }
+  ai: { n: 'ИИ-ассистент', d: 'Заполнение из документов, сверка с документами, вопросы к регистру, регистр из описания, разбор к M&M. Требует настройки модели.', r: ['aicheck', 'ask', 'aiquality'], core: true }
 };
 const modOn = (k) => { const m = Settings.data.modules; return m && k in m ? !!m[k] : !!MODULES[k]?.core; };
 const routeOff = (r) => { const base = String(r || '').split('/')[0]; return Object.entries(MODULES).some(([k, m]) => !modOn(k) && m.r.includes(base)); };
