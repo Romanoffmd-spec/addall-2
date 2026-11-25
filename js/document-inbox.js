@@ -41,6 +41,21 @@ const DocumentInbox = {
     } catch (error) { toast(error.message, 'err'); }
   },
 
+  /* ФИО, дата рождения и пол для новой карточки: ИИ читает их из документа, врач проверяет в окне карточки.
+     Внешний сервис ИИ получает текст только после согласия; локальная модель без вопроса. */
+  async patientFrom(document) {
+    const text = document?.text || (document?.pages || []).join('\n');
+    if (!text || typeof AI !== 'object' || !AI.ready()) return {};
+    if (!AI.local() && !(await confirmBox('Заполнить ФИО, дату рождения и пол из документа? Текст документа уйдёт во внешний сервис ИИ.'))) return {};
+    const fields = [F('lastName', 'Фамилия'), F('firstName', 'Имя'), F('middleName', 'Отчество'), F('birthDate', 'Дата рождения', 'date'), F('sex', 'Пол', 'select', { options: ['М', 'Ж'] })];
+    try {
+      const raw = AI.parse(await AI.call(AI.prompt('Карточка пациента', AI.schemaOf(fields, []), null), { text }));
+      const { out } = AI.normalize(fields, [], raw.fields || {});
+      if (Object.keys(out).length) toast('ФИО, дата рождения и пол заполнены из документа. Проверьте перед сохранением');
+      return out;
+    } catch (error) { return {}; }
+  },
+
   async action(id, action, body) {
     try {
       await NET.call('POST', 'intake/' + id + '/' + action, body || {});
@@ -133,8 +148,8 @@ const DocumentInbox = {
       <div class="row between"><button class="btn" id="inReject">Отклонить документ</button><button class="btn primary" id="inApply">Сохранить выбранные поля</button></div>`, { full: true });
     $('#inOriginal', box).onclick = () => this.openSource(source);
     const newPatient = $('#inNewPatient', box);
-    if (newPatient) newPatient.onclick = () => patientDialog(null, [reg], reg.id, {
-      center: item.center, patientNumber: item.patientNumber, onCreated: async patientId => {
+    if (newPatient) newPatient.onclick = async () => patientDialog(null, [reg], reg.id, {
+      center: item.center, patientNumber: item.patientNumber, prefill: await this.patientFrom(item.document), onCreated: async patientId => {
         box.close();
         await this.open(id, patientId);
       }

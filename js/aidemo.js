@@ -45,17 +45,23 @@ const AIDemo = {
   /* ---------- ответы по видам запросов ---------- */
   extractOne(prompt, doc) {
     const schema = AIDemo.json(prompt, 'Поля формы (JSON):\n', '\nОтвет:');
-    const { fields, evidence } = AIDemo.extractFields(schema, AIDemo.lines(doc.text));
-    const d = AIDemo.firstDate(doc.text);
+    const lines = AIDemo.lines(doc.text);
+    const { fields, evidence } = AIDemo.extractFields(schema, lines);
+    /* дата события: строка с подписью даты этой формы, иначе первая дата документа, кроме даты рождения */
+    const label = AIDemo.between(prompt, 'дату события «', '»'), own = label && lines.find(l => l.label === AIDemo.norm(label));
+    const d = own && AIDemo.day(own.value) ? { day: AIDemo.day(own.value) } : AIDemo.firstDate(lines.filter(l => !/рожд/.test(l.label)).map(l => l.raw).join('\n'));
     return { event_date: d?.day || null, fields, evidence, warnings: ['Демонстрационный ИИ учебного режима: значения найдены по строкам «Поле: значение»'] };
   },
   extractAll(prompt, doc) {
     const schema = AIDemo.json(prompt, 'Схема (JSON): ', '\nТолько JSON');
-    const lines = AIDemo.lines(doc.text), d = AIDemo.firstDate(doc.text);
+    const lines = AIDemo.lines(doc.text), d = AIDemo.firstDate(lines.filter(l => !/рожд/.test(l.label)).map(l => l.raw).join('\n'));
     const events = [];
     for (const et of schema?.event_types || []) {
       const { fields, evidence } = AIDemo.extractFields(et.fields, lines);
-      if (Object.keys(fields).length >= 2) events.push({ type: et.type, event_date: d?.day || null, date_evidence: d?.quote || '', fields, evidence });
+      /* дата события: строка с подписью даты этой формы («Дата операции: …»), иначе первая дата документа, кроме даты рождения */
+      const own = lines.find(l => (et.date_meaning && l.label === AIDemo.norm(et.date_meaning)) || l.label === AIDemo.norm('Дата (' + et.name + ')'));
+      const day = own && AIDemo.day(own.value);
+      if (Object.keys(fields).length >= 2) events.push({ type: et.type, event_date: day || d?.day || null, date_evidence: day ? own.raw : d?.quote || '', fields, evidence });
     }
     const out = { events: events.slice(0, 3), warnings: ['Демонстрационный ИИ учебного режима'] };
     if (schema?.patient) out.patient = AIDemo.extractFields(schema.patient, lines).fields;
@@ -94,7 +100,8 @@ const AIDemo = {
     if (has('операц', 'хирург', 'резекц', 'грыж', 'вмешат') || ets.length === 1) ets.push({ id: 'surgery', name: 'Операция', dateLabel: 'Дата операции', sections: [{ title: 'Операция', fields: [F('op', 'Вид операции', 'text', { required: true }), F('access', 'Доступ', 'select', { options: ['открытый', 'лапароскопический', 'робот'] }), F('dur', 'Длительность', 'number', { unit: 'мин' }), F('comp', 'Осложнения', 'complist')] }, { title: 'Исход госпитализации', fields: [F('leak', 'Несостоятельность анастомоза', 'yesno'), F('readm', 'Повторная госпитализация в 30 дней', 'yesno'), F('death30', 'Смерть в 30 дней', 'yesno')] }] });
     if (has('морфолог', 'гистолог', 'ypt', 'pcr')) ets.push({ id: 'path', name: 'Патоморфология', dateLabel: 'Дата заключения', sections: [{ title: 'Заключение', fields: [F('ypt', 'ypT', 'select', { options: ['T0', 'T1', 'T2', 'T3', 'T4'] }), F('ypn', 'ypN', 'select', { options: ['N0', 'N1', 'N2'] }), F('lnn', 'Удалено лимфоузлов', 'number')] }] });
     ets.push({ id: 'followup', name: 'Наблюдение', dateLabel: 'Дата контакта', expect: { days: 90, every: 90, mode: 'at' }, sections: [{ title: 'Статус', fields: [F('status', 'Статус', 'select', { options: ['жив', 'умер', 'потерян для наблюдения'], required: true }), F('recur', 'Рецидив или повторный рост', 'yesno'), ...(has('lars', 'функц') ? [F('lars', 'Шкала LARS', 'number', { min: 0, max: 42 })] : [])] }] });
-    const name = ask.length > 8 ? 'Регистр: ' + ask.replace(/^регистр\S*\s*/i, '').slice(0, 60) : 'Новый регистр';
+    const head = ask.split(/[:;.,(]/)[0].trim().slice(0, 80);
+    const name = head.length > 8 ? (/^регистр/i.test(head) ? head.charAt(0).toUpperCase() + head.slice(1) : 'Регистр: ' + head) : 'Новый регистр';
     const indicators = [];
     if (ets.some(e => e.id === 'surgery')) indicators.push({ id: 'i_leak', name: 'Несостоятельность анастомоза', et: 'surgery', num: { key: 'leak', op: 'eq', value: 'да' }, denom: null, lowerBetter: true });
     indicators.push({ id: 'i_recur', name: 'Рецидив или повторный рост', et: 'followup', num: { key: 'recur', op: 'eq', value: 'да' }, denom: null, lowerBetter: true });
