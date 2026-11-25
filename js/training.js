@@ -21,6 +21,7 @@ const TRAINING_CHAPTERS = [
     { t: '#bell', title: 'Уведомления', text: 'Новые запросы по данным к вам, ответы на ваши запросы, просроченные наблюдения и другие события, которые требуют вашего действия.' },
     { t: '#theme', title: 'Тема', text: 'Переключает светлую и тёмную тему. Выбор запоминается в этом браузере.' },
     { t: '#userBtn', title: 'Ваш профиль', text: 'Имя и роль. Отсюда открываются настройки профиля, смена пароля, язык и выход. От роли зависит, что вы можете делать: вносить, проверять, блокировать, администрировать.' },
+    { t: '#sbTrain', opt: true, title: 'Учебный режим', text: 'Отдельный пункт в самом низу меню, над профилем. Здесь генератор вымышленных пациентов и выход в рабочую базу. В рабочей базе тот же пункт открывает учебный режим.' },
     { t: '#sbCol', opt: true, title: 'Свернуть меню', text: 'Сворачивает боковое меню до значков и освобождает место для таблиц и отчётов.' }
   ] },
   { id: 'training', name: 'Учебные данные и генератор', page: 'training', go: 'training', leave: 'next', steps: [
@@ -257,6 +258,7 @@ const TrainingGuide = {
   close() {
     this.running = false;
     this.closeModal();
+    this.closeActs();
     this.root?.remove();
     this.root = null;
     this.target = null;
@@ -300,6 +302,10 @@ const TrainingGuide = {
       }
     } catch (error) { }
   },
+  closeActs() {
+    for (const w of (this.actWraps || []).reverse()) if (w.isConnected) { const x = w.querySelector('.modal-x'); if (x) x.click(); else w.remove(); }
+    this.actWraps = [];
+  },
   closeModal() {
     if (this.openedModal) $('.modal-wrap .modal-x')?.click();
     this.openedModal = false;
@@ -336,6 +342,15 @@ const TrainingGuide = {
       return;
     }
     if (step.modal && !(await this.openModal())) { this.skipChapter(step, dir); return; }
+    /* шаги с действием (act): гайд сам открывает окно или запускает функцию, чтобы показать результат;
+       окна, открытые действием, закрываются на следующем шаге, если у него нет keep */
+    if (!step.keep) this.closeActs();
+    if (step.act) {
+      const before = new Set($$('.modal-wrap'));
+      try { await step.act(); } catch (error) { }
+      this.actWraps = [...(step.keep ? this.actWraps || [] : []), ...$$('.modal-wrap').filter(w => !before.has(w))];
+      if (!this.running || this.steps[this.index] !== step) return;
+    }
     if (step.t && step.opt && !(await this.findLater(step.t))) { this.show(index + dir, dir); return; }
     if (step.t) await this.findLater(step.t, 4);
     this.draw(true);

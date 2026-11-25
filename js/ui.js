@@ -57,6 +57,7 @@ const UI_ICONS = {
   check: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>',
   mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="M4 7l8 6 8-6"/>',
   lang: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.3 2.4 3.4 5.2 3.4 8.5s-1.1 6.1-3.4 8.5c-2.3-2.4-3.4-5.2-3.4-8.5s1.1-6.1 3.4-8.5z"/>',
+  book: '<path d="M4.5 5.5A2 2 0 0 1 6.5 3.5h12v15h-12a2 2 0 0 0-2 2z"/><path d="M4.5 20.5v-15M8.5 7.5h6M8.5 11h4"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/>'
 };
 const UI_GLYPH = { '☺': 'user', '☑': 'check', '⚙': 'gear', '⎋': 'logout', '✉': 'mail', '⇄': 'lang' };
@@ -376,6 +377,11 @@ const SB = {
     }
     /* низ панели: пользователь и ИИ-переключатель */
     const foot = sb.querySelector('.sb-foot');
+    /* учебный режим отдельным пунктом в самом низу меню, над профилем */
+    if (typeof Routes.training === 'function') {
+      foot.insertAdjacentHTML('beforeend', `<a class="sb-it sb-train" id="sbTrain" href="#training" title="Учебный режим"><i>${uiIcon('book', 18)}</i><span>Учебный режим</span></a>`);
+      foot.querySelector('#sbTrain').addEventListener('click', () => this.mobile(false));
+    }
     const pill = document.getElementById('aiPill'); if (pill) foot.appendChild(pill);
     const ub = document.getElementById('userBtn'); if (ub) foot.appendChild(ub);
     /* верхняя полоса контента: меню (телефон), крошки, действия */
@@ -428,6 +434,7 @@ const SB = {
       const o = this.groupsOpen(); o[id] = now; this.saveGroups(o);
     });
     nav.querySelectorAll('.sb-it').forEach(a => a.addEventListener('click', () => this.mobile(false)));
+    document.getElementById('sbTrain')?.classList.toggle('on', (location.hash.slice(1).split('/')[0]) === 'training');
   },
   crumbs() {
     const el = document.getElementById('crumbs'); if (!el) return;

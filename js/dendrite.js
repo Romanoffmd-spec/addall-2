@@ -11,7 +11,7 @@ const _navGroups = navGroups;
 navGroups = async function () {
   const g = await _navGroups();
   const add = (id, items) => { const x = g.find(y => y.id === id); if (x && x.items) x.items.push(...items.filter(Boolean)); };
-  add('work', [{ sep: 'Мои данные' }, { r: 'mydata', t: 'Экспорт моих данных', i: '⇩' }, { r: 'delegates', t: 'Делегаты (ввод за врача)', i: '⇄' }, { r: 'training', t: 'Учебный режим', i: '✎' }]);
+  add('work', [{ sep: 'Мои данные' }, { r: 'mydata', t: 'Экспорт моих данных', i: '⇩' }, { r: 'delegates', t: 'Делегаты (ввод за врача)', i: '⇄' }]);
   add('sci', [{ sep: 'Отчёты' }, can('analyse') && { r: 'surgeon', t: 'Отчёт хирурга и сертификат', i: '☆' }, { r: 'regdocs', t: 'Документы регистров', i: '⎙' }]);
   add('adm', [can('users') && { r: 'dsr', t: 'Запросы субъектов данных', i: '⚖' }]);
   return g;
@@ -719,7 +719,7 @@ function quickGuide(reg) {
     <li>Если вносите данные за врача, выберите его в поле <span class="k">Владелец записи</span>. Врач назначает делегатов в разделе <span class="k">Работа → Делегаты</span>.</li>
     <li>Не хватает данных: <span class="k">Сохранить черновик</span>. Полную запись: <span class="k">Сохранить</span>.</li>
     <li>Свои данные можно в любой момент выгрузить: <span class="k">Работа → Экспорт моих данных</span>.</li>
-    <li>Потренироваться без риска: <span class="k">Работа → Учебный режим</span>.</li></ol></body></html>`);
+    <li>Потренироваться без риска: <span class="k">Учебный режим (внизу меню, над профилем)</span>.</li></ol></body></html>`);
   w.document.close();
 }
 

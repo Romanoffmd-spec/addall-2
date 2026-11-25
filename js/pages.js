@@ -549,7 +549,7 @@ async function patientDialog(p, regs, regId, intake) {
   if (!regs.length) return toast('Сначала создайте регистр', 'err');
   const isNew = !p;
   p = p ? clone(p) : { registryId: regId || regs[0].id, center: intake?.center ?? Auth.user.center ?? '',
-    localId: intake?.patientNumber || '', data: {}, consent: '' };
+    localId: intake?.patientNumber || '', data: {}, consent: '', ...(intake?.prefill || {}) };
   const reg = () => regs.find(r => r.id === $('#pd_reg', m).value) || regs[0];
   const m = modal(`<h2>${isNew ? 'Новый пациент' : 'Данные пациента'}</h2>
     <div class="grid">
