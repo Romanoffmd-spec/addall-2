@@ -363,7 +363,8 @@ Routes.period = async (main, regId = '') => {
       const data = center === selected.center ? d : await Period.collect(reg, { ...selected, center });
       const fingerprint = Period.fingerprint(reg, data);
       const approval = approvals.find(row => row.center === center && row.from === selected.from && row.to === selected.to && row.fingerprint === fingerprint);
-      return { center, fingerprint, approval, ready: data.checks.every(check => check.ok) };
+      return { center, fingerprint, approval, ready: data.checks.every(check => check.ok),
+        results: data.results.map(({ id, name, kind, num, den, miss, na, pct }) => ({ id, name, kind, num, den, miss, na, pct })) };
     }));
     if (stale() || selected.from !== filter.from || selected.to !== filter.to || selected.center !== filter.center) return;
     const canSign = !!selected.center && (can('users') || Auth.user.role === 'lead' && Auth.user.center === selected.center);
@@ -409,6 +410,7 @@ Routes.period = async (main, regId = '') => {
         recon: d.recon ? { found: d.recon.found, expected: d.recon.expected, pct: d.recon.pct, unresolved: d.recon.unresolved, source: (await Recon.runFor(reg, filter))?.source || '' } : null,
         kind, snapshot, exception, approvalIds: perCenter.map(row => row.approval?.id).filter(Boolean),
         approvalFingerprints: Object.fromEntries(perCenter.map(row => [row.center, row.fingerprint])),
+        byCenter: perCenter.map(row => ({ center: row.center, results: row.results })),
         note, acceptedBy: Auth.user.name, acceptedAt: nowISO() };
       try { const saved = await DB.put('releases', record, 'выпуск отчёта за период'); all.push(saved); } catch (error) { return toast(error.message, 'err'); }
       toast('Отчёт выпущен, версия ' + record.version);
