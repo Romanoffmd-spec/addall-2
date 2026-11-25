@@ -103,7 +103,10 @@ const RegistryExport = {
       for (const patient of identities.values()) if (!options.center || patient.center === options.center) participants.add(patient.id);
     }
     const alias = (array, prefix) => new Map([...array].sort().map((id, i) => [id, clinical ? id : prefix + String(i + 1).padStart(5, '0')]));
-    const participantIds = alias(participants, 'P');
+    /* код участника: постоянный ID AddAll по выбору, иначе новые коды для этого файла */
+    const participantIds = options.stablePid && !clinical
+      ? new Map([...participants].map(id => [id, identities.get(id)?.pid || alias(participants, 'P').get(id)]))
+      : alias(participants, 'P');
     const episodeIds = alias(new Set(events.map(event => links.get(event.id)).filter(Boolean)), 'EP');
     const eventIds = alias(events.map(event => event.id), 'EV');
     const dateBase = new Map();
@@ -199,7 +202,7 @@ const RegistryExport = {
       form: indicator.et, definition: JSON.stringify({ numerator: indicator.num, denominator: indicator.denom, measure: indicator.measure, reference: indicator.ref })
     }));
     return { format: 'addall-registry-package/1', registry: reg.name, exported_at: nowISO(), schema_version: version,
-      identified: clinical, filters: { from: options.from || null, to: options.to || null, center: options.center || null, drafts: !!options.drafts, fields: options.fields || null }, tables: rows };
+      identified: clinical, filters: { from: options.from || null, to: options.to || null, center: options.center || null, drafts: !!options.drafts, stablePid: !!options.stablePid, fields: options.fields || null }, tables: rows };
   },
 
   downloadBundle(bundle, format, fileName) {
@@ -238,7 +241,8 @@ Routes['registry-export'] = async (main, regId = '') => {
       ${centers().map(center => `<option value="${esc(center)}">${esc(center)}</option>`).join('')}</select></div>
       <div class="fld"><label for="bxPrivacy">Состав</label><select class="inp" id="bxPrivacy"><option value="coded">Без прямых идентификаторов</option>
       ${can('users') ? '<option value="clinical">С идентификаторами пациентов</option>' : ''}</select></div>
-      <label class="chk"><input type="checkbox" id="bxDrafts">Включить черновики</label></div>
+      <label class="chk"><input type="checkbox" id="bxDrafts">Включить черновики</label>
+      <label class="chk" title="Постоянный ID пациента AddAll одинаков во всех выгрузках: данные разных выгрузок можно связать. Без отметки коды пациентов новые в каждом файле: так безопаснее для передачи наружу"><input type="checkbox" id="bxPid">Код пациента: постоянный ID AddAll (для связи выгрузок)</label></div>
       <div class="row"><button class="btn" id="bxChooseFields">Выбрать поля</button><span id="bxFieldNote" class="muted">Все разрешённые поля</span></div>
       <p class="muted">В режиме без идентификаторов исключаются номера карт, ФИО, контакты, свободный текст и поля, помеченные как чувствительные. Даты заменяются днями от начала наблюдения.</p>
       <div class="row"><button class="btn primary" data-bx="xlsx">Excel</button><button class="btn" data-bx="csv">ZIP с CSV</button><button class="btn" data-bx="json">JSON</button></div>
@@ -290,7 +294,7 @@ Routes['registry-export'] = async (main, regId = '') => {
     button.disabled = true;
     try {
       const [ds, proms] = await Promise.all([loadReg($('#bxReg', main).value), DB.all('proms')]);
-      const bundle = RegistryExport.assemble(ds, proms, { from, to, center: $('#bxCenter', main).value, drafts: $('#bxDrafts', main).checked, identified, fields: chosenFields });
+      const bundle = RegistryExport.assemble(ds, proms, { from, to, center: $('#bxCenter', main).value, drafts: $('#bxDrafts', main).checked, stablePid: $('#bxPid', main).checked, identified, fields: chosenFields });
       await Audit.log('выгрузка комплекта ' + button.dataset.bx + (identified ? ' (с идентификаторами)' : ''), 'registries', ds.reg.id, null, null);
       RegistryExport.downloadBundle(bundle, button.dataset.bx, slug(ds.reg.name) + '_registry_' + today());
       $('#bxSummary', main).textContent = 'Пациентов ' + bundle.tables.participants.length + ', событий ' + bundle.tables.events.length + ', анкет ' + bundle.tables.questionnaires.length;

@@ -374,7 +374,7 @@ Routes.period = async (main, regId = '') => {
         results: data.results.map(({ id, name, kind, num, den, miss, na, pct }) => ({ id, name, kind, num, den, miss, na, pct })) };
     }));
     if (stale() || selected.from !== filter.from || selected.to !== filter.to || selected.center !== filter.center) return;
-    const canSign = !!selected.center && (can('users') || Auth.user.role === 'lead' && Auth.user.center === selected.center);
+    const canSign = !!selected.center && (Auth.user.role === 'admin' || ['lead', 'manager'].includes(Auth.user.role) && Auth.user.center === selected.center);
     const versions = all.filter(same).sort((a, b) => a.version - b.version);
     const last = versions[versions.length - 1];
     box.innerHTML = `<h2>Готовность периода</h2><p>Случаев (${esc(Episodes.openerName(reg).toLowerCase())}) за период: <b>${d.episodes.length}</b>.</p>

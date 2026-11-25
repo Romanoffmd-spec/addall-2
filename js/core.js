@@ -122,8 +122,8 @@ function parseCSV(text) {
 }
 
 /* ---------- хранилище (IndexedDB) ---------- */
-const DB_VERSION = 8;
-const STORES = ['users', 'registries', 'patients', 'events', 'mdt', 'proms', 'audit', 'settings', 'saved', 'queries', 'trials', 'alloc', 'screening', 'journals', 'jrecs', 'files', 'comments', 'refs', 'docs', 'doctpl', 'coverage', 'tasks', 'recon', 'releases', 'periodApprovals', 'secondEntries'];
+const DB_VERSION = 9;
+const STORES = ['users', 'registries', 'patients', 'events', 'mdt', 'proms', 'audit', 'settings', 'saved', 'queries', 'trials', 'alloc', 'screening', 'journals', 'jrecs', 'files', 'comments', 'refs', 'docs', 'doctpl', 'coverage', 'tasks', 'recon', 'releases', 'periodApprovals', 'secondEntries', 'datarequests'];
 /* учебный режим: отдельная база-песочница с вымышленными пациентами */
 const TRAIN = (() => { try { return localStorage.getItem('addall2.mode') === 'train'; } catch (e) { return false; } })();
 const DB = {
@@ -165,7 +165,12 @@ const DB = {
       const patient = await this.get('patients', obj.patientId);
       if (patient) obj.episodeCenter = patient.center || '';
     }
-    if (store === 'patients') obj.enrollmentCenter = before?.enrollmentCenter ?? before?.center ?? obj.center ?? '';
+    if (store === 'patients') {
+      obj.enrollmentCenter = before?.enrollmentCenter ?? before?.center ?? obj.center ?? '';
+      /* в серверной версии ID выдаёт сервер: он видит все учреждения и проверяет уникальность */
+      if (typeof NET !== 'undefined' && NET.on) { if (before?.pid) obj.pid = before.pid; }
+      else obj.pid = PID.assign(obj, before, await this.all('patients'));
+    }
     obj.updatedAt = nowISO(); obj.updatedBy = Auth.user?.id || null;
     if (!before) { obj.createdAt = obj.createdAt || obj.updatedAt; obj.createdBy = obj.createdBy || obj.updatedBy; }
     if (typeof FIRE !== 'undefined' && FIRE.on && store === 'patients' && !obj.seq) {
@@ -216,7 +221,42 @@ const ROLES = {
   researcher: { name: 'Исследователь', perms: ['view', 'export', 'analyse'] },
   monitor: { name: 'Монитор', perms: ['view', 'audit', 'analyse', 'query'] },
   resident: { name: 'Резидент', perms: ['view', 'enter'] },
-  viewer: { name: 'Только просмотр', perms: ['view'] }
+  viewer: { name: 'Только просмотр', perms: ['view'] },
+  datamanager: { name: 'Регистратор данных', perms: ['view', 'enter', 'edit', 'proms'] },
+  manager: { name: 'Руководство учреждения', perms: ['view', 'analyse', 'approve'] },
+  auditor: { name: 'Внешний аудитор (на срок проверки)', perms: ['view', 'audit', 'query'] },
+  authority: { name: 'Орган здравоохранения (только отчёты)', perms: ['national'] },
+  sponsor: { name: 'Фарма / спонсор (только отчёты и заявки)', perms: ['national', 'datareq'] },
+  itadmin: { name: 'ИТ-администратор (без медицинских данных)', perms: ['users'] }
+};
+/* исследователь работает с обезличенными данными; орган здравоохранения и фарма видят только официальные отчёты */
+const PSEUDO_ROLES = ['researcher', 'authority', 'sponsor'];
+const isPseudo = () => PSEUDO_ROLES.includes(Auth.user?.role);
+
+/* ID пациента AddAll: «AA-XXXX-XXXX-K», 8 случайных знаков алфавита Крокфорда и контрольный знак Luhn mod 32.
+   Выдаётся при создании карточки и не меняется; один ИИН получает один ID во всех регистрах.
+   Из ID нельзя восстановить личность: он служит кодом для обезличенной работы и выгрузок. */
+const PID = {
+  A: '0123456789ABCDEFGHJKMNPQRSTVWXYZ',
+  check(body) {
+    let factor = 2, sum = 0;
+    for (let i = body.length - 1; i >= 0; i--) { let add = factor * PID.A.indexOf(body[i]); factor = factor === 2 ? 1 : 2; add = Math.floor(add / 32) + (add % 32); sum += add; }
+    return PID.A[(32 - (sum % 32)) % 32];
+  },
+  valid(v) { const m = /^AA-([0-9A-HJKMNP-TV-Z]{4})-([0-9A-HJKMNP-TV-Z]{4})-([0-9A-HJKMNP-TV-Z])$/.exec(String(v || '').toUpperCase()); return !!m && PID.check(m[1] + m[2]) === m[3]; },
+  make() { const b = [...crypto.getRandomValues(new Uint8Array(8))].map(x => PID.A[x % 32]).join(''); return `AA-${b.slice(0, 4)}-${b.slice(4)}-${PID.check(b)}`; },
+  iin(v) { const d = String(v || '').replace(/\D/g, ''); return d.length === 12 ? d : ''; },
+  /* ID для карточки: прежний, ID того же ИИН из другого регистра или новый уникальный */
+  assign(obj, before, patients) {
+    if (before?.pid) return before.pid;
+    const key = PID.iin(obj.iin), same = key && patients.find(p => p.id !== obj.id && p.pid && PID.iin(p.iin) === key);
+    if (same) return same.pid;
+    const used = new Set(patients.filter(p => p.id !== obj.id).map(p => p.pid));
+    if (PID.valid(obj.pid) && !used.has(obj.pid)) return obj.pid;
+    let pid; do pid = PID.make(); while (used.has(pid));
+    return pid;
+  },
+  show: p => p?.pid || (p?.seq ? 'ID ' + p.seq : '')
 };
 const PERM_NAMES = { view: 'Просмотр', enter: 'Ввод', edit: 'Правка', delete: 'Удаление', export: 'Экспорт', analyse: 'Анализ', design: 'Конструктор', users: 'Пользователи', mdt: 'МДК', proms: 'Опросники', audit: 'Аудит', query: 'Запросы', lock: 'Блокировка', trials: 'Исследования', randomise: 'Рандомизация' };
 const can = (p) => !!Auth.user && (ROLES[Auth.user.role]?.perms || []).includes(p);
@@ -401,6 +441,8 @@ const App = {
   },
   async nav() {
     const groups = await navGroups(); App.groups = groups;
+    /* пока меню собиралось, пользователь мог выйти: экрана с меню уже нет */
+    if (!$('#mnav')) return;
     const cur = (location.hash.slice(1) || 'home');
     const curG = ROUTE_GROUP[cur.split('/')[0]];
     $('#mnav').innerHTML = groups.map(g => g.items

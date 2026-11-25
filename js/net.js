@@ -50,6 +50,7 @@ if (NET.on) {
       const saved = await NET.call('PUT', 's/' + store, payload);
       if (saved.rev != null) obj.rev = saved.rev;
       if (saved.seq != null) obj.seq = saved.seq;
+      if (saved.pid) obj.pid = saved.pid;
     },
     async rawDel(store, id) { await NET.call('DELETE', 's/' + store + '/' + encodeURIComponent(id)); },
     async clear(store) { await NET.call('DELETE', 's/' + store); }

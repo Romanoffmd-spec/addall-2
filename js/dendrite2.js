@@ -118,7 +118,7 @@ eventDialog = async function (p, reg, ev) {
 
 /* ================= ИСПРАВЛЕНИЯ ЧЕРЕЗ АДМИНИСТРАТОРА ================= */
 function correctionDialog(p, ev) {
-  const m = modal(`<h3>Запрос на исправление</h3><p class="muted">Пациент ID ${p.seq || '?'} · № ${esc(p.localId)}${ev ? ` · событие от ${fmtDate(ev.date)}` : ''}. ФИО, дату рождения, пол и дату сохранённого события меняет администратор: так ошибки не исчезают без следа.</p>
+  const m = modal(`<h3>Запрос на исправление</h3><p class="muted">Пациент ${esc(PID.show(p) || '?')} · № ${esc(p.localId)}${ev ? ` · событие от ${fmtDate(ev.date)}` : ''}. ФИО, дату рождения, пол и дату сохранённого события меняет администратор: так ошибки не исчезают без следа.</p>
     <div class="fld"><label class="flab">Что исправить и на что</label><textarea class="inp" id="cr_t" rows="3" placeholder="Например: дата рождения 05.05.1960 вместо 15.05.1960"></textarea></div><div class="row end"><button class="btn primary" id="cr_ok">Отправить администратору</button></div>`);
   $('#cr_ok', m).onclick = async () => { const t = $('#cr_t', m).value.trim(); if (!t) return toast('Опишите исправление', 'err');
     const S = Settings.data; S.corrections = S.corrections || []; S.corrections.push({ id: uid('cr'), at: nowISO(), by: Auth.user.id, byName: Auth.user.name, patientId: p.id, seq: p.seq, localId: p.localId, eventId: ev?.id || '', text: t, status: 'открыт' }); await Settings.save();
