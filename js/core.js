@@ -428,7 +428,7 @@ const App = {
         <a class="t2-brand" href="#home"><img src="media/addall-icon.svg" alt=""><span class="wm">Add<i>All</i></span><span class="sub"><b>${esc(Settings.data.department || 'Платформа регистров')}</b><em>${esc(Settings.data.center || 'локальная версия')}</em></span></a>
         <button class="cmdk" id="cmdk"><span>⌕ Поиск пациентов и разделов</span><kbd>Ctrl K</kbd></button>
         <div class="top-r">
-          <button class="aipill ${AI.ready() ? 'on' : ''}" id="aiPill" title="Настройки ИИ"><span class="tgl"><i></i></span><span>ИИ ${AI.ready() ? (AI.local() ? 'локально' : 'вкл.') : 'выкл.'}</span></button>
+          <button class="aipill ${AI.ready() ? 'on' : ''}" id="aiPill" title="Настройки ИИ"><span class="tgl"><i></i></span><span>ИИ ${AI.ready() ? (AI.cfg().provider === 'demo' ? 'демо' : AI.local() ? 'локально' : 'вкл.') : 'выкл.'}</span></button>
           <button class="aibtn" id="aiBtn"><b>✦</b> Ассистент</button>
           <button class="iconbtn" id="bell" title="Уведомления">🔔<span class="bdg" id="bellN" style="display:none"></span></button>
           <button class="iconbtn" id="theme" title="Тема">${document.documentElement.dataset.theme === 'dark' ? '☀' : '☾'}</button>
