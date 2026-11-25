@@ -7,6 +7,9 @@ service cloud.firestore {
     function isMember() { return signed() && exists(/databases/$(db)/documents/members/$(request.auth.uid)); }
     function active() { return isMember() && mem().active == true; }
     function admin() { return active() && mem().admin == true; }
+    function role() { return mem().get('role', ''); }
+    // орган здравоохранения, фарма и ИТ-администратор не читают данные пациентов: только регистры, отчёты и заявки
+    function noPatients() { return role() in ['authority', 'sponsor', 'itadmin']; }
     function booted() { return exists(/databases/$(db)/documents/meta/boot); }
 
     // признак, что первый администратор уже создан: виден всем (нужен странице входа)
@@ -35,7 +38,8 @@ service cloud.firestore {
     // пользователи и настройки платформы: меняет администратор; сам пользователь может обновить свою запись
     match /s_users/{id} {
       allow read: if active();
-      allow write: if admin() || (active() && mem().userId == id);
+      // свою запись сотрудник обновляет, но роль в ней (отдельное поле role) менять не может
+      allow write: if admin() || (active() && mem().userId == id && request.resource.data.get('role', '') == role());
     }
     match /s_settings/{id} {
       allow read: if active();
@@ -44,7 +48,10 @@ service cloud.firestore {
 
     // все остальные хранилища (регистры, пациенты, события и т. д.)
     match /{store}/{id} {
-      allow read, write: if active() && store.matches('s_.*') && !(store in ['s_audit', 's_users', 's_settings']);
+      allow read: if active() && store.matches('s_.*') && !(store in ['s_audit', 's_users', 's_settings'])
+        && (!noPatients() || store in ['s_registries', 's_releases', 's_datarequests', 's_doctpl', 's_periodApprovals']);
+      allow write: if active() && store.matches('s_.*') && !(store in ['s_audit', 's_users', 's_settings'])
+        && (!noPatients() || store == 's_datarequests');
     }
   }
 }
