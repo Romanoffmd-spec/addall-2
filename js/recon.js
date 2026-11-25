@@ -279,6 +279,13 @@ const Period = {
       { ok: !openQ, text: `Открытых запросов по данным: ${openQ}` },
       { ok: !orphans.length, text: `Записей с номером эпизода, которого нет в регистре: ${orphans.length}${orphans.length ? ' (в расчёт не входят; исправьте номер или внесите эпизод)' : ''}` }
     ];
+    /* двойной ввод: проверка появляется, только если он включён хотя бы для одной формы */
+    const deForms = new Set((reg.eventTypes || []).filter(et => et.doubleEntry).map(et => et.id));
+    if (deForms.size) {
+      const done = new Set((await DB.all('secondEntries')).filter(x => x.registryId === reg.id && x.status === 'сверено').map(x => x.eventId));
+      const open = cohortEvents.filter(e => deForms.has(e.type) && e.status !== 'черновик' && !done.has(e.id)).length;
+      checks.push({ ok: !open, text: `Двойной ввод не завершён (нет второго ввода или не сверены расхождения): ${open}` });
+    }
     return { patients: cohortPatients, episodes, cohortEvents, cohortTasks, cohortQueries, run, recon, follow, drafts, openQ, orphans, results, checks, asOf };
   },
   fingerprint(reg, data) {

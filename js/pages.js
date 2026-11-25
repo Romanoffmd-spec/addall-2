@@ -255,20 +255,24 @@ Routes.registry = async (main, id, tab = 'general', mode = '') => {
 
   if (tab === 'events') {
     const draw = () => {
-      body.innerHTML = `${ro ? '' : '<div class="row"><button class="btn" id="addEt">+ Тип события</button></div>'}
-        ${reg.eventTypes.map((et, ei) => `<div class="card et" style="border-left:4px solid ${et.color || '#888'}">
+      body.innerHTML = `${ro ? '' : '<div class="row"><button class="btn" id="addEt">+ Тип события</button><button class="btn" id="libEt">+ Форма из библиотеки</button></div><p class="muted small">Формы, разделы и поля можно перетаскивать мышкой. Поле переносится только внутри своей формы.</p>'}
+        ${reg.eventTypes.map((et, ei) => `<div class="card et" ${ro ? '' : `draggable="true" data-dg="e:${ei}"`} style="border-left:4px solid ${et.color || '#888'}">
           <div class="row between"><h3>${esc(et.name)} <small class="muted">${et.single ? '· однократное' : '· повторяемое'} · дата: «${esc(et.dateLabel || 'Дата')}»</small></h3>
-          ${ro ? '' : `<div class="row"><button class="btn sm" data-ete="${ei}">Настроить</button><button class="btn sm" data-etu="${ei}">↑</button><button class="btn sm" data-etd="${ei}">↓</button><button class="btn sm danger" data-etx="${ei}">×</button></div>`}</div>
-          ${(et.sections || []).map((s, si) => `<div class="sec-b"><div class="row between"><b class="sec-t">${esc(s.title)}</b>${ro ? '' : `<span><button class="btn xs" data-sr="${ei}:${si}">Переименовать</button> <button class="btn xs" data-sx="${ei}:${si}">Удалить раздел</button></span>`}</div>
-            <table class="tbl fields"><tbody>${(s.fields || []).map((f, fi) => `<tr><td><b>${esc(f.label)}</b>${f.required ? ' <i class="req">*</i>' : ''}<div class="muted mono">${esc(f.key)}</div></td><td>${esc(FIELD_TYPES[f.type] || f.type)}${f.type === 'calc' ? `<div class="muted mono">${esc(f.formula || '')}</div>` : ''}</td>
+          ${ro ? '' : `<div class="row"><button class="btn sm" data-ete="${ei}">Настроить</button><button class="btn sm" data-etc="${ei}" title="Создать копию формы в этом регистре">Копировать</button><button class="btn sm ${et.doubleEntry ? 'primary' : ''}" data-etdd="${ei}" title="Форму вносят дважды разные сотрудники, расхождения сверяются">Двойной ввод: ${et.doubleEntry ? 'да' : 'нет'}</button><button class="btn sm" data-etu="${ei}">↑</button><button class="btn sm" data-etd="${ei}">↓</button><button class="btn sm danger" data-etx="${ei}">×</button></div>`}</div>
+          ${(et.sections || []).map((s, si) => `<div class="sec-b" ${ro ? '' : `draggable="true" data-dg="s:${ei}:${si}"`}><div class="row between"><b class="sec-t">${esc(s.title)}</b>${ro ? '' : `<span><button class="btn xs" data-sr="${ei}:${si}">Переименовать</button> <button class="btn xs" data-sx="${ei}:${si}">Удалить раздел</button></span>`}</div>
+            <table class="tbl fields"><tbody>${(s.fields || []).map((f, fi) => `<tr ${ro ? '' : `draggable="true" data-dg="f:${ei}:${si}:${fi}"`}><td><b>${esc(f.label)}</b>${f.required ? ' <i class="req">*</i>' : ''}<div class="muted mono">${esc(f.key)}</div></td><td>${esc(FIELD_TYPES[f.type] || f.type)}${f.type === 'calc' ? `<div class="muted mono">${esc(f.formula || '')}</div>` : ''}</td>
               <td class="muted">${f.showIf?.key ? `если ${esc(f.showIf.key)} ${esc(OPS[f.showIf.op] || '')} ${esc(f.showIf.value || '')}` : ''}</td><td class="muted">${f.def ? '§ определение' : ''}</td>
               ${ro ? '' : `<td class="nowrap"><button class="btn xs" data-fe="${ei}:${si}:${fi}">✎</button><button class="btn xs" data-fu="${ei}:${si}:${fi}">↑</button><button class="btn xs" data-fd="${ei}:${si}:${fi}">↓</button><button class="btn xs danger" data-fx="${ei}:${si}:${fi}">×</button></td>`}</tr>`).join('')}</tbody></table>
             ${ro ? '' : `<button class="btn xs" data-fa="${ei}:${si}">+ Поле</button>`}</div>`).join('')}
-          ${ro ? '' : `<button class="btn xs" data-sa="${ei}">+ Раздел</button> <button class="btn xs" data-rb="${ei}">+ Блок модели риска</button>`}
+          ${ro ? '' : `<button class="btn xs" data-sa="${ei}">+ Раздел</button> <button class="btn xs" data-sl="${ei}">+ Раздел из библиотеки</button> <button class="btn xs" data-rb="${ei}">+ Блок модели риска</button>`}
         </div>`).join('')}`;
       const idx = (s) => s.split(':').map(Number);
       body.onclick = async (e) => {
         const b = e.target.closest('button'); if (!b || ro) return; const d = b.dataset;
+        if (b.id === 'libEt') return FormLib.pick(reg, 'form', (et, same) => { reg.eventTypes.push(FormLib.cloneForm(reg, et, same)); mark(); draw(); toast('Форма добавлена'); });
+        if (d.etc) { reg.eventTypes.splice(Number(d.etc) + 1, 0, FormLib.cloneForm(reg, reg.eventTypes[d.etc], true)); mark(); draw(); toast('Копия формы добавлена'); return; }
+        if (d.etdd) { const et = reg.eventTypes[d.etdd]; if (et.doubleEntry) delete et.doubleEntry; else et.doubleEntry = true; mark(); draw(); return; }
+        if (d.sl) return FormLib.pick(reg, 'section', sec => { reg.eventTypes[d.sl].sections.push(FormLib.cloneSection(reg, sec)); mark(); draw(); toast('Раздел добавлен'); });
         if (b.id === 'addEt') { reg.eventTypes.push({ id: uid('et'), name: 'Новое событие', color: '#888888', dateLabel: 'Дата', sections: [{ id: uid('s'), title: 'Основное', fields: [] }] }); mark(); draw(); }
         if (d.ete) etDialog(reg.eventTypes[d.ete], () => { mark(); draw(); });
         if (d.etu && d.etu > 0) { const a = reg.eventTypes; [a[d.etu - 1], a[d.etu]] = [a[d.etu], a[d.etu - 1]]; mark(); draw(); }
@@ -292,6 +296,7 @@ Routes.registry = async (main, id, tab = 'general', mode = '') => {
         if (d.fd) { const [a, s, f] = idx(d.fd); const L = reg.eventTypes[a].sections[s].fields; if (f < L.length - 1) { [L[f + 1], L[f]] = [L[f], L[f + 1]]; mark(); draw(); } }
         if (d.fx) { const [a, s, f] = idx(d.fx); if (await confirmBox('Удалить поле? Уже введённые значения останутся в базе и в экспорте.')) { reg.eventTypes[a].sections[s].fields.splice(f, 1); mark(); draw(); } }
       };
+      FormLib.bind(body, reg, ro, () => { mark(); draw(); });
     };
     draw();
   }
