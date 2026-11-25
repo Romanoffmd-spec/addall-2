@@ -83,7 +83,9 @@ ${JSON.stringify(schema)}
     if (c.provider === 'ollama') {
       if (doc.pdf && !doc.text) throw new Error('В PDF нет текстового слоя (скан). Для локальной модели сохраните страницы как изображения или вставьте текст.');
       const msg = { role: 'user', content: prompt + (doc.text ? '\n\nДОКУМЕНТ:\n' + doc.text : '') }; if (doc.image) msg.images = [doc.image];
-      const r = await fetch((c.url || 'http://localhost:11434').replace(/\/$/, '') + '/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: c.model || 'qwen2.5:7b', messages: [msg], stream: false, format: 'json', options: { temperature: 0 } }) });
+      const r = await fetch((c.url || 'http://localhost:11434').replace(/\/$/, '') + '/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: c.model || 'qwen2.5:7b', messages: [msg], stream: false, format: 'json',
+        /* рассуждающие модели (Qwen3, DeepSeek-R1) без рассуждений отвечают в разы быстрее; окно 32 тыс. токенов, чтобы выписка не обрезалась */
+        ...(/qwen3|deepseek-r1|magistral|gpt-oss/i.test(c.model || '') ? { think: false } : {}), options: { temperature: 0, num_ctx: Number(c.ctx) || 32768 } }) });
       if (!r.ok) throw new Error('Ollama: ' + r.status + ' ' + (await r.text()).slice(0, 200));
       return (await r.json()).message?.content || '';
     }
@@ -344,7 +346,7 @@ ${JSON.stringify(schema)}
     const c = this.cfg();
     return `<div class="card"><h3>ИИ-ассистент (заполнение из документов)</h3><div class="grid">
       <div class="fld"><label class="flab">Провайдер</label><select class="inp" id="ai_p"><option value="none">выключен</option><option value="ollama" ${c.provider === 'ollama' ? 'selected' : ''}>Локальная модель (Ollama), данные не покидают ПК</option><option value="anthropic" ${c.provider === 'anthropic' ? 'selected' : ''}>Claude API (Anthropic)</option><option value="openai" ${c.provider === 'openai' ? 'selected' : ''}>OpenAI-совместимый сервер (в т.ч. сервер ННОЦ)</option></select></div>
-      <div class="fld"><label class="flab">Модель</label><input class="inp" id="ai_m" value="${esc(c.model || '')}" placeholder="qwen2.5:7b / claude-sonnet-5-5"></div>
+      <div class="fld"><label class="flab">Модель</label><input class="inp" id="ai_m" value="${esc(c.model || '')}" placeholder="qwen3.5:9b / claude-sonnet-5-5"></div>
       <div class="fld"><label class="flab">Адрес сервера</label><input class="inp" id="ai_u" value="${esc(c.url || '')}" placeholder="http://localhost:11434"></div>
       <div class="fld"><label class="flab">API-ключ</label><input class="inp" type="password" id="ai_k" value="${esc(c.key || '')}" placeholder="не нужен для Ollama"></div></div>
       <p class="help">Локально: установите Ollama, выполните <span class="mono">ollama pull qwen2.5:7b</span> (для фото документов: <span class="mono">qwen2.5vl:7b</span>). Ключ хранится только в этом браузере.</p>
