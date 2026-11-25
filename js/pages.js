@@ -601,11 +601,22 @@ async function patientDialog(p, regs, regId, intake) {
       && String(x.localId || '').trim().toUpperCase() === v('pd_id').toUpperCase());
     if (dup && intake) return toast('В этом учреждении уже есть карточка с таким номером. Выберите её при проверке документа', 'err');
     if (dup && !(await confirmBox(`Пациент с номером ${v('pd_id')} уже есть (${pname(dup)}). Всё равно сохранить?`))) return;
+    const before0 = p.id ? clone(await DB.get('patients', p.id)) : null;
     Object.assign(p, { registryId: reg().id, localId: v('pd_id'), lastName: v('pd_ln'), firstName: v('pd_fn'), middleName: v('pd_mn'), birthDate: v('pd_bd'), sex: v('pd_sx'), phone: v('pd_ph'), email: v('pd_em'), center: v('pd_ce'), consent: v('pd_cs'), idType: v('pd_idt'), iin: v('pd_iin'), funding: v('pd_fu'), promsConsent: v('pd_pc'), vital: v('pd_vs'), deathDate: v('pd_vs') === 'умер' ? v('pd_dd') : '', data: { ...(p.data || {}), ...readForm($('#pd_extra', m)) } });
     p.ids = $('#pd_ids', m).value.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const i = l.indexOf(':'); return i > 0 ? { type: l.slice(0, i).trim(), value: l.slice(i + 1).trim() } : { type: 'ID', value: l }; });
     if (!p.seq) p.seq = (await DB.all('patients')).reduce((mx, x) => Math.max(mx, x.seq || 0), 0) + 1;
+    let action;
+    const keys0 = ['localId', 'lastName', 'firstName', 'middleName', 'birthDate', 'sex', 'phone', 'email', 'center', 'consent', 'idType', 'iin', 'funding', 'promsConsent', 'vital', 'deathDate', 'data', 'ids'];
+    /* пустые значения и значение по умолчанию у типа документа не считаются изменением */
+    const norm0 = v => { if (v && typeof v === 'object' && !Array.isArray(v)) v = Object.fromEntries(Object.entries(v).filter(([, x]) => !isEmpty(x)).sort(([a], [b]) => a.localeCompare(b))); return JSON.stringify(v == null || v === '' || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length) ? '' : v); };
+    const changed0 = before0 ? keys0.filter(k => norm0(before0[k]) !== norm0(p[k])).filter(k => !(k === 'idType' && !before0.idType)) : [];
+    if (changed0.length) {
+      const why = (await promptBox('Причина изменения карточки пациента (попадёт в журнал аудита)'))?.trim();
+      if (!why) return toast('Изменение не сохранено: укажите причину', 'err');
+      action = 'изменение (причина: ' + why + ')';
+    }
     try {
-      const saved = await DB.put('patients', p);
+      const saved = await DB.put('patients', p, action);
       m.close(); toast('Сохранено');
       if (intake) await intake.onCreated(saved.id);
       else go('patient/' + saved.id);
@@ -792,7 +803,14 @@ async function eventDialog(p, reg, ev) {
       delete obj.verifiedAt;
       delete obj.verifiedBy;
     }
-    try { await DB.put('events', obj); }
+    /* изменение уже сохранённой (не черновой) записи: причина обязательна, она попадает в журнал аудита */
+    let action;
+    if (ev.id && ev.status && ev.status !== 'черновик' && (date !== ev.date || JSON.stringify(data) !== JSON.stringify(ev.data || {}))) {
+      const why = (await promptBox('Причина изменения сохранённой записи (попадёт в журнал аудита), например: «уточнено по выписке»'))?.trim();
+      if (!why) return toast('Изменение не сохранено: укажите причину', 'err');
+      obj.changeReason = why; action = 'изменение (причина: ' + why + ')';
+    } else delete obj.changeReason;
+    try { await DB.put('events', obj, action); }
     catch (error) { return toast(error.message, 'err'); }
     read.clearAutosave?.();
     rememberUsers(et, data); rememberOpts(et, data);

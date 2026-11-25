@@ -54,9 +54,15 @@ if (NET.on) {
     async rawDel(store, id) { await NET.call('DELETE', 's/' + store + '/' + encodeURIComponent(id)); },
     async clear(store) { await NET.call('DELETE', 's/' + store); }
   });
-  Auth.login = async function (login, pass) {
+  Auth.login = async function (login, pass, code) {
     this.lastErr = ''; this.applicationNumber = '';
-    const r = await NET.call('POST', 'login', { login, pass });
+    const r = await NET.call('POST', 'login', code ? { login, pass, code } : { login, pass });
+    /* включён двухфакторный вход: спрашиваем одноразовый код и повторяем вход */
+    if (!r.ok && r.err === 'totp' && !code) {
+      const c = (await promptBox('Одноразовый код из приложения-аутентификатора (6 цифр)'))?.replace(/\s/g, '');
+      if (!c) { this.lastErr = 'totpcancel'; return false; }
+      return Auth.login(login, pass, c);
+    }
     if (!r.ok) { this.lastErr = r.err || ''; if (r.lockedUntil) this.lockedUntil = r.lockedUntil; this.applicationNumber = r.applicationNumber || ''; return false; }
     NET.setToken(r.token); const u = r.user;
     const pd = Number(Settings.data?.passDays || 0);

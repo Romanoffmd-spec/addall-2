@@ -156,7 +156,8 @@ Routes.passport = async (main, regId = '') => {
   const ps = reg.passport || {};
   const edit = regManage(reg);
   const checks = await National.checks(reg);
-  const releases = (await DB.all('releases')).filter(r => r.registryId === reg.id && r.kind === 'official').sort((a, b) => String(b.acceptedAt).localeCompare(String(a.acceptedAt)));
+  const allReleases = (await DB.all('releases')).filter(r => r.registryId === reg.id).sort((a, b) => String(b.acceptedAt).localeCompare(String(a.acceptedAt)));
+  const releases = allReleases.filter(r => r.kind === 'official');
   const fld = (id, label, val, hint = '', rows = 0) => `<div class="fld"><label class="flab" for="ps_${id}">${label}</label>${rows ? `<textarea class="inp" id="ps_${id}" rows="${rows}" ${edit ? '' : 'disabled'}>${esc(val || '')}</textarea>` : `<input class="inp" id="ps_${id}" value="${esc(val || '')}" ${edit ? '' : 'disabled'}>`}${hint ? `<div class="help">${hint}</div>` : ''}</div>`;
   const done = checks.filter(c => c.ok).length;
   main.innerHTML = `<div class="head"><h1>Паспорт регистра</h1>${regSelect(regs, reg.id, 'psReg', false)}</div>
@@ -175,7 +176,10 @@ Routes.passport = async (main, regId = '') => {
       ${edit ? '<div class="row end"><button class="btn primary" id="psSave">Сохранить паспорт</button></div>' : '<p class="muted small">Изменять паспорт может руководитель регистра или администратор.</p>'}</div>
     <div class="card" id="psPublic"><h2>Публичная страница</h2>
       <p>Страница для сайта Минздрава, учреждения или профессионального общества. Собирается только из официального выпуска периода: цифры не меняются после выпуска. Пациентов и их данных на странице нет. Группы меньше порога скрываются. Для каждого учреждения показана доля с поправкой на надёжность.</p>
-      ${releases.length ? `<div class="row"><select class="inp" id="psRel">${releases.map(r => `<option value="${esc(r.id)}">${fmtDate(r.from)} - ${fmtDate(r.to)}${r.center ? ', ' + esc(r.center) : ''} · версия ${r.version}</option>`).join('')}</select><button class="btn" id="psPub">Скачать страницу (HTML)</button></div>` : '<p class="muted">Официальных выпусков пока нет. Выпустите отчёт на экране «Отчётный период».</p>'}</div>`;
+      ${releases.length ? `<div class="row"><select class="inp" id="psRel">${releases.map(r => `<option value="${esc(r.id)}">${fmtDate(r.from)} - ${fmtDate(r.to)}${r.center ? ', ' + esc(r.center) : ''} · версия ${r.version}</option>`).join('')}</select><button class="btn" id="psPub">Скачать страницу (HTML)</button></div>` : '<p class="muted">Официальных выпусков пока нет. Выпустите отчёт на экране «Отчётный период».</p>'}</div>
+    <div class="card" id="psRecord"><h2>Описание данных для статьи (RECORD)</h2>
+      <p>Черновик раздела «Методы» для публикации на данных регистра по пунктам чек-листа RECORD (Benchimol и соавт., PLoS Med 2015): источник данных, отбор случаев, коды и определения, качество и полнота, связывание с другими базами, ограничения. Собирается из паспорта, словаря и выпуска за период. Проверьте и допишите текст перед подачей.</p>
+      ${allReleases.length ? `<div class="row"><select class="inp" id="psRecRel">${allReleases.map(r => `<option value="${esc(r.id)}">${fmtDate(r.from)} - ${fmtDate(r.to)}${r.center ? ', ' + esc(r.center) : ''} · версия ${r.version} · ${r.kind === 'official' ? 'официальный' : 'внутренний'}</option>`).join('')}</select><button class="btn" id="psRec">Скачать описание (Markdown)</button></div>` : '<p class="muted">Нужен хотя бы один выпуск за период.</p>'}</div>`;
   $('#psReg', main).onchange = e => go('passport/' + e.target.value);
   const save = $('#psSave', main);
   if (save) save.onclick = async () => {
@@ -183,6 +187,13 @@ Routes.passport = async (main, regId = '') => {
     reg.passport = { ...ps, owner: v('owner'), custodian: v('custodian'), contact: v('contact'), council: v('council'), purpose: v('purpose'), legal: v('legal'),
       inclusion: v('inclusion'), storage: v('storage'), minCell: Math.max(1, Math.round(Number(v('minCell')) || 10)), names: v('names'), updatedAt: nowISO(), updatedBy: Auth.user.name };
     try { await DB.put('registries', reg, 'паспорт регистра'); toast('Паспорт сохранён'); App.route(); } catch (e) { toast(e.message, 'err'); }
+  };
+  const rec = $('#psRec', main);
+  if (rec) rec.onclick = async () => {
+    const r = allReleases.find(x => x.id === $('#psRecRel', main).value);
+    if (!r) return;
+    download(`${slug(reg.name)}_${r.from}_${r.to}_v${r.version}_RECORD.md`, await National.recordText(reg, r), 'text/markdown');
+    Audit.log('описание данных RECORD из выпуска', 'releases', r.id, null, null);
   };
   const pub = $('#psPub', main);
   if (pub) pub.onclick = () => {
@@ -224,6 +235,58 @@ ${(r.follow || []).length ? `<p class="m">Полнота наблюдения: $
 <h2>Как читать</h2><p>95% ДИ это доверительный интервал Уилсона. Доля с поправкой на надёжность учитывает, что у учреждений с малым числом случаев результат сильно зависит от случайности: такая оценка сдвинута к общей доле тем сильнее, чем меньше случаев (Dimick, Staiger, Birkmeyer, Health Services Research, 2010). Группы меньше ${small} случаев не показываются, чтобы нельзя было узнать отдельных пациентов. Случаи с неизвестным исходом в расчёт не входят.</p>
 ${ps.legal ? `<p class="m">Правовое основание: ${e(ps.legal)}</p>` : ''}${ps.contact ? `<p class="m">Контакт: ${e(ps.contact)}</p>` : ''}
 <p class="m">Сформировано в AddAll 2.0 из неизменяемого снимка выпуска. Версия схемы регистра v${e(r.schemaVersion)}.</p></body></html>`;
+};
+
+/* ---------- описание данных для статьи по чек-листу RECORD ----------
+   Benchimol EI et al. The REporting of studies Conducted using Observational Routinely-collected health Data
+   (RECORD) statement. PLoS Med 2015;12(10):e1001885. Нумерация пунктов по чек-листу RECORD. */
+National.recordText = async (reg, r) => {
+  const ps = reg.passport || {}, d = s => s ? String(s).slice(0, 10).split('-').reverse().join('.') : '';
+  const patients = await Data.patients(reg.id);
+  const withDeathList = patients.filter(p => p.deathSource).length;
+  const fields = (reg.eventTypes || []).flatMap(et => formFields(et).map(f => ({ et, f })));
+  const coded = fields.filter(x => x.f.standardCode || x.f.codeSystem || ['icd10', 'icdo'].includes(x.f.type) || x.f.dict);
+  const used = new Set((r.definitions || []).flatMap(i => [i.num?.key, i.denom?.key, i.measure?.field].filter(Boolean)));
+  const defs = fields.filter(x => used.has(x.f.key));
+  const lines = [], L = (s = '') => lines.push(s);
+  L(`# ${reg.name}: описание данных (черновик по чек-листу RECORD)`);
+  L(`Источник: AddAll 2.0, выпуск за период ${d(r.from)} - ${d(r.to)}, версия ${r.version} (${r.kind === 'official' ? 'официальный' : 'внутренний'}), выпущен ${d(r.acceptedAt)}; версия схемы регистра v${r.schemaVersion}. Текст собран автоматически: проверьте и дополните места в квадратных скобках.`);
+  L();
+  L('## Название и аннотация (RECORD 1.1-1.3)');
+  L(`- 1.1 Тип данных: проспективный клинический регистр «${reg.name}»${ps.owner ? ', владелец данных: ' + ps.owner : ''}.`);
+  L(`- 1.2 Территория и период: [укажите регион и учреждения]; период ${d(r.from)} - ${d(r.to)}${r.center ? ', учреждение: ' + r.center : ''}.`);
+  L(`- 1.3 Связывание баз данных: ${withDeathList ? `сведения о смерти для ${withDeathList} пациентов загружены из внешнего списка (сопоставление по ИИН или № ИБ); [укажите источник списка].` : 'связывание с другими базами не проводилось.'}`);
+  L();
+  L('## Участники (RECORD 6.1-6.3)');
+  L(`- 6.1 Отбор: единица учёта «${r.unitName || ''}». Критерии включения: ${ps.inclusion || reg.description || '[укажите]'}. Цель регистра: ${ps.purpose || '[укажите]'}.`);
+  L(`- 6.2 Проверка кодов и определений: ${coded.length ? `поля с внешней классификацией: ${coded.map(x => x.f.label).join(', ')}.` : 'внешние классификации не использовались.'} Валидационные исследования кодов в регистре: [укажите, если были].`);
+  L(`- 6.3 Связывание: ${withDeathList ? 'сопоставление по ИИН, при его отсутствии по № ИБ и учреждению; неоднозначные совпадения проверялись вручную.' : 'не применялось.'}`);
+  L();
+  L('## Переменные (RECORD 7.1)');
+  for (const i of r.definitions || []) L(`- ${i.name}: ${i.text || ''}`);
+  for (const x of defs) L(`  - «${x.f.label}» (${x.et.name}, код ${x.f.key}${x.f.standardCode ? ', ' + (x.f.codeSystem || '') + ' ' + x.f.standardCode : ''})${x.f.def ? ': ' + x.f.def : ''}`);
+  L();
+  L('## Доступ к данным и очистка (RECORD 12.1-12.3)');
+  L('- 12.1 Доступ: исследователи [имели / не имели] доступ ко всей базе регистра; анализ проведён на неизменяемом снимке выпуска.');
+  L(`- 12.2 Качество и очистка данных: ${r.recon ? `охват по независимому списку ${r.recon.pct ?? 'не рассчитан'}% (${r.recon.found} из ${r.recon.expected}${r.recon.source ? ', источник: ' + r.recon.source : ''}); ` : 'сверка с независимым списком не проводилась; '}${(r.follow || []).length ? 'полнота наблюдения: ' + r.follow.map(s => `${s.name} ${s.done} из ${s.due}${s.missing ? `, нет ${s.missing}` : ''}`).join('; ') + '; ' : ''}состояние на дату выпуска: ${(r.checks || []).map(c => (c.ok ? 'выполнено: ' : 'замечание: ') + c.text).join('; ')}.`);
+  L(`- 12.3 Связывание: ${withDeathList ? 'см. пункты 1.3 и 6.3.' : 'не применялось.'}`);
+  L();
+  L('## Результаты (RECORD 13.1)');
+  L(`- 13.1 Отбор случаев: в выпуск вошло ${(r.cohort || []).length} случаев (${new Set(r.patients || []).size} пациентов). По показателям:`);
+  for (const x of r.results || []) L(`  - ${x.name}: в расчёте ${x.den}, событий ${x.num}, исход неизвестен ${x.miss || 0}${x.na ? `, не применимо ${x.na}` : ''}.`);
+  L('  [Постройте по этим числам схему отбора случаев.]');
+  L();
+  L('## Ограничения (RECORD 19.1)');
+  L('- Случаи с неизвестным исходом не входили в расчёт долей; если пропуски не случайны, это может смещать результат. Множественная импутация не применялась.');
+  L(`- ${r.recon ? 'Неполный охват по независимому списку может приводить к систематической ошибке отбора.' : 'Без сверки с независимым списком полнота включения неизвестна.'}`);
+  L('- Возможны ошибки классификации при ручном вводе и при извлечении данных из документов; [укажите долю записей, проверенных по первичной документации, и долю записей с двойным вводом].');
+  L();
+  L('## Доступность протокола и данных (RECORD 22.1)');
+  L(`- Словарь данных и определения показателей: выгрузка из AddAll (версия схемы v${r.schemaVersion}). Протокол регистра: ${ps.legal ? ps.legal : '[укажите]'}. Доступ к данным: ${ps.contact ? 'по запросу, ' + ps.contact : '[укажите порядок]'}.`);
+  L();
+  L('## Статистические методы');
+  L('- Доли с 95% доверительным интервалом Уилсона. Сравнение учреждений: доля с поправкой на надёжность, эмпирическая байесовская оценка (Dimick, Staiger, Birkmeyer, Health Serv Res 2010). [Добавьте модели риска и программы анализа, если использовались.]');
+  return lines.join('\n');
 };
 
 /* ---------- 4. сведения о смерти из внешнего списка ---------- */
@@ -363,7 +426,8 @@ if (typeof TRAINING_CHAPTERS !== 'undefined' && typeof TrainingGuide === 'object
     { id: 'passport', name: 'Паспорт регистра', page: 'passport', go: 'passport', steps: [
       { t: '#psChecks', title: 'Готовность регистра', text: 'Автоматический чек-лист: назначены ли ответственные, есть ли определения полей и показателей, сроки наблюдения, сверка с независимым списком, официальный отчёт, отметки о согласии и где хранятся данные. Восклицательный знак показывает, чего не хватает и где это исправить.' },
       { t: '#psForm', title: 'Управление и описание', text: 'Владелец данных, ответственный, совет регистра, цель, правовое основание и критерии включения. Здесь же место хранения данных, порог малых групп и то, как называть учреждения на публичной странице. Сохраняет руководитель регистра или администратор.' },
-      { t: '#psPublic', title: 'Публичная страница', text: 'Скачивает готовую страницу для сайта из официального выпуска периода. Пациентов на ней нет, малые группы скрыты, у учреждений показана доля с поправкой на надёжность.' }
+      { t: '#psPublic', title: 'Публичная страница', text: 'Скачивает готовую страницу для сайта из официального выпуска периода. Пациентов на ней нет, малые группы скрыты, у учреждений показана доля с поправкой на надёжность.' },
+      { t: '#psRecord', title: 'Описание данных для статьи', text: 'Черновик раздела «Методы» для публикации по чек-листу RECORD: источник, отбор, определения, охват и полнота, связывание баз, ограничения. Места в квадратных скобках нужно дописать самому.' }
     ] },
     { id: 'compare', name: 'Сравнение учреждений и врачей', page: 'compare', go: 'compare', steps: [
       { t: '#cmCenters', title: 'Учреждения', text: 'Для выбранного показателя и периода: число случаев, наблюдаемая доля с 95% интервалом и доля с поправкой на надёжность. У учреждений с малым числом случаев оценка сдвинута к общей доле, чтобы случайность не делала их лучшими или худшими.' },

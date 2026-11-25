@@ -188,9 +188,15 @@ const Audit = {
     const diff = {};
     if (before && after) {
       const a = before.data || before, b = after.data || after;
+      const skip = ['updatedAt', 'updatedBy', 'pass', 'salt', 'seq', 'ptr', 'rev'];
       Object.keys({ ...a, ...b }).forEach(k => {
-        if (['updatedAt', 'updatedBy', 'pass', 'salt', 'seq', 'ptr', 'rev'].includes(k)) return;
+        if (skip.includes(k)) return;
         if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) diff[k] = [a[k], b[k]];
+      });
+      /* у записи с полем data изменения вне data (ФИО, даты, статус) тоже попадают в журнал, с пометкой «карточка:» */
+      if (before.data || after.data) Object.keys({ ...before, ...after }).forEach(k => {
+        if (k === 'data' || skip.includes(k) || k === 'createdAt' || k === 'createdBy') return;
+        if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) diff['карточка: ' + k] = [before[k], after[k]];
       });
       if (!Object.keys(diff).length) return;
     }
