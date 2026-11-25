@@ -435,6 +435,8 @@ html[data-theme="dark"] .sb-it.on{background:#1A1A20}
 .sb-foot .user .av{flex-basis:32px;width:32px;height:32px}
 .sb-foot .user .muted svg{transform:rotate(180deg)}
 .sb-foot .aipill{align-self:flex-start}
+.sb-foot .sb-train{width:100%;border:1px dashed var(--line)}
+html.train .sb-foot .sb-train{border-color:#f59e0b;color:#b45309}
 
 /* свёрнутая панель: только иконки (только на широком экране) */
 @media (min-width:901px){
