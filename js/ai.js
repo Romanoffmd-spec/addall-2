@@ -2,7 +2,14 @@
 'use strict';
 
 const AI = {
-  cfg() { return Settings.data.ai || { provider: 'none' }; },
+  /* настройка ИИ: общая (без ключа) в настройках платформы и своя для этого устройства в браузере.
+     Своя важнее: локальная модель на одном компьютере не ломает ИИ на других устройствах. Ключ API хранится только в браузере. */
+  device() { try { return JSON.parse(localStorage.getItem('addall2.ai.device') || 'null') || {}; } catch (e) { return {}; } },
+  cfg() {
+    const dev = this.device(), shared = { ...(Settings.data.ai || { provider: 'none' }) };
+    delete shared.key;
+    return dev.provider ? dev : { ...shared, key: dev.key || '' };
+  },
   ready() { const c = this.cfg(); return c.provider && c.provider !== 'none'; },
   local() { return this.cfg().provider === 'ollama'; },
 
@@ -348,12 +355,22 @@ ${JSON.stringify(schema)}
       <div class="fld"><label class="flab">Провайдер</label><select class="inp" id="ai_p"><option value="none">выключен</option><option value="ollama" ${c.provider === 'ollama' ? 'selected' : ''}>Локальная модель (Ollama), данные не покидают ПК</option><option value="anthropic" ${c.provider === 'anthropic' ? 'selected' : ''}>Claude API (Anthropic)</option><option value="openai" ${c.provider === 'openai' ? 'selected' : ''}>OpenAI-совместимый сервер (в т.ч. сервер ННОЦ)</option></select></div>
       <div class="fld"><label class="flab">Модель</label><input class="inp" id="ai_m" value="${esc(c.model || '')}" placeholder="qwen3.5:9b / claude-sonnet-5-5"></div>
       <div class="fld"><label class="flab">Адрес сервера</label><input class="inp" id="ai_u" value="${esc(c.url || '')}" placeholder="http://localhost:11434"></div>
-      <div class="fld"><label class="flab">API-ключ</label><input class="inp" type="password" id="ai_k" value="${esc(c.key || '')}" placeholder="не нужен для Ollama"></div></div>
-      <p class="help">Локально: установите Ollama, выполните <span class="mono">ollama pull qwen2.5:7b</span> (для фото документов: <span class="mono">qwen2.5vl:7b</span>). Ключ хранится только в этом браузере.</p>
+      <div class="fld"><label class="flab">API-ключ</label><input class="inp" type="password" id="ai_k" value="${esc(c.key || '')}" placeholder="не нужен для Ollama" autocomplete="off"></div></div>
+      <label class="chk"><input type="checkbox" id="ai_dev" ${this.device().provider || !Settings.data.ai?.provider || Settings.data.ai?.provider === 'none' ? 'checked' : ''}> только на этом устройстве (для локальной модели на этом компьютере)</label>
+      <p class="help">Локальная модель: Ollama на этом компьютере, данные пациентов не покидают его. Ключ API хранится только в этом браузере и никуда не отправляется, кроме самого сервиса ИИ. Без отметки «только на этом устройстве» провайдер и модель становятся общими для всех устройств, ключ всё равно остаётся только здесь.</p>
       <div class="row"><button class="btn" id="ai_s">Сохранить</button><button class="btn" id="ai_test">Проверить связь</button><span id="ai_tr" class="muted"></span></div></div>`;
   },
   bindSettings() {
-    const save = async () => { Settings.data.ai = { provider: $('#ai_p').value, model: $('#ai_m').value.trim(), url: $('#ai_u').value.trim(), key: $('#ai_k').value.trim() }; await DB.rawPut('settings', Settings.data); };
+    const save = async () => {
+      const v = { provider: $('#ai_p').value, model: $('#ai_m').value.trim(), url: $('#ai_u').value.trim() }, key = $('#ai_k').value.trim();
+      if ($('#ai_dev').checked) localStorage.setItem('addall2.ai.device', JSON.stringify({ ...v, key }));
+      else {
+        localStorage.setItem('addall2.ai.device', JSON.stringify(key ? { key } : {}));
+        Settings.data.ai = v; await DB.rawPut('settings', Settings.data);
+      }
+      /* ключ, сохранённый раньше в общих настройках, убирается оттуда */
+      if (Settings.data.ai && 'key' in Settings.data.ai) { delete Settings.data.ai.key; await DB.rawPut('settings', Settings.data); }
+    };
     $('#ai_s').onclick = async () => { await save(); toast('Сохранено'); };
     $('#ai_test').onclick = async () => { await save(); $('#ai_tr').textContent = 'проверяю…'; try { const t = await this.call('Ответь JSON: {"ok": true}', { text: '' }); $('#ai_tr').innerHTML = /ok/.test(t) ? '<b class="good">работает</b>' : esc(t.slice(0, 80)); } catch (e) { $('#ai_tr').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } };
   }
