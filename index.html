@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Политика безопасности: страница загружает скрипты только с сайта AddAll и Firebase и обращается только к перечисленным адресам (Firebase, ИИ, PubMed, Crossref, локальная Ollama). Чужой скрипт, внедрённый через данные, не сможет ни загрузиться, ни отправить данные на посторонний адрес. Новый адрес ИИ нужно добавить в connect-src. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file: 'unsafe-inline' 'unsafe-eval' https://www.gstatic.com; connect-src 'self' file: blob: data: https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://api.anthropic.com https://api.crossref.org https://eutils.ncbi.nlm.nih.gov http://localhost:11434 http://127.0.0.1:11434; img-src 'self' file: data: blob: https:; style-src 'self' file: 'unsafe-inline'; font-src 'self' file: data:; frame-src 'self' file: blob: data: https://*.firebaseapp.com; worker-src 'self' file: blob:; media-src 'self' file: blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta name="referrer" content="no-referrer">
 <script>try{document.documentElement.setAttribute('data-theme',localStorage.getItem('addall2.theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'))}catch(e){}</script>
 <title>AddAll 2.0 · платформа клинических регистров</title>
 <link rel="icon" type="image/svg+xml" href="media/addall-icon.svg">
