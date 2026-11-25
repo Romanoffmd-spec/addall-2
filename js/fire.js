@@ -20,8 +20,9 @@ const FIRE = {
     await this.load(b + 'firebase-app-compat.js');
     await Promise.all([this.load(b + 'firebase-auth-compat.js'), this.load(b + 'firebase-firestore-compat.js')]);
   },
-  enc(o) { return { v: JSON.stringify(o), at: new Date().toISOString(), by: Auth.user?.id || null }; },
-  dec(d) { try { return d && d.v ? NET.dec(JSON.parse(d.v)) : undefined; } catch (e) { return undefined; } },
+  /* у пользователя роль лежит ещё и отдельным полем: правила Firestore не дают сотруднику изменить её в своей записи */
+  enc(o, store) { const d = { v: JSON.stringify(o), at: new Date().toISOString(), by: Auth.user?.id || null }; if (store === 'users') d.role = !FIRE.mem || FIRE.mem.admin ? (o.role || '') : (FIRE.mem.role || ''); return d; },
+  dec(d) { try { const o = d && d.v ? NET.dec(JSON.parse(d.v)) : undefined; if (o && d.role && typeof d.role === 'string') o.role = d.role; return o; } catch (e) { return undefined; } },
   signedIn() { return !!(this.auth && this.auth.currentUser); },
   stop() { Object.values(this.unsub).forEach(f => { try { f(); } catch (e) { } }); this.unsub = {}; this.cache = {}; this.ready = {}; },
   /* подписка на хранилище: данные приходят в память и обновляются в реальном времени */
@@ -37,7 +38,10 @@ const FIRE = {
     });
     return this.ready[store];
   },
-  pending: [] /* записи до создания первого администратора (мастер первого запуска) */
+  pending: [], /* записи до создания первого администратора (мастер первого запуска) */
+  mem: null, /* запись участника (members/<uid>): роль и доступ задаёт только администратор */
+  /* хэш и соль пароля в Firestore не хранятся: пароль проверяет Firebase Authentication */
+  strip(store, o) { if (store !== 'users' || !o) return o; const c = { ...o }; delete c.pass; delete c.salt; return c; }
 };
 FIRE.on = !!FIRE.cfg && /^https:$/.test(location.protocol) && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !TRAIN;
 
@@ -68,9 +72,12 @@ if (FIRE.on) {
     },
     async rawPut(store, obj) {
       if (!FIRE.signedIn()) { FIRE.pending = FIRE.pending.filter(x => !(x.store === store && x.obj.id === obj.id)); FIRE.pending.push({ store, obj }); return; }
-      const o = await NET.enc(obj);
-      await FIRE.col(store).doc(String(obj.id)).set(FIRE.enc(o));
-      const m = FIRE.cache[store]; if (m) m.set(String(obj.id), obj);
+      const clean = FIRE.strip(store, obj);
+      /* сотрудник (не администратор) пишет свою запись только со своей ролью из записи участника */
+      if (store === 'users' && FIRE.mem && !FIRE.mem.admin && FIRE.mem.role) clean.role = FIRE.mem.role;
+      const o = await NET.enc(clean);
+      await FIRE.col(store).doc(String(obj.id)).set(FIRE.enc(o, store));
+      const m = FIRE.cache[store]; if (m) m.set(String(obj.id), clean);
     },
     async rawDel(store, id) { await FIRE.col(store).doc(String(id)).delete(); const m = FIRE.cache[store]; if (m) m.delete(String(id)); },
     async clear(store) {
@@ -85,7 +92,7 @@ if (FIRE.on) {
   hashPass = async function (pass, salt) { lastPass = { pass, salt }; return _hash(pass, salt); };
 
   /* участник (members/<uid>) определяет, пускают ли правила Firestore к данным */
-  const memberOf = (u) => ({ userId: u.id, active: u.active !== false && !['pending', 'rejected'].includes(u.status), admin: u.role === 'admin', login: u.login, at: new Date().toISOString() });
+  const memberOf = (u) => ({ userId: u.id, active: u.active !== false && !['pending', 'rejected'].includes(u.status), admin: u.role === 'admin', role: u.role || '', login: u.login, at: new Date().toISOString() });
 
   const _put = DB.put.bind(DB);
   DB.put = async function (store, obj, action) {
@@ -128,14 +135,48 @@ if (FIRE.on) {
     FIRE.stop();
     let mem = null; try { mem = (await FIRE.fs.doc('members/' + FIRE.auth.currentUser.uid).get()).data(); } catch (e) { }
     if (!mem || !mem.active) { await FIRE.auth.signOut(); this.lastErr = 'pending'; return false; }
-    if (await _login(login, pass)) return true;
-    /* пароль сменили по ссылке из письма: обновить хэш в записи пользователя */
-    const u = (await DB.all('users')).find(x => x.login.toLowerCase() === String(login).trim().toLowerCase() && x.active !== false);
-    if (u) { u.salt = uid('s'); u.pass = await _hash(pass, u.salt); u.failCount = 0; delete u.lockedUntil; await DB.rawPut('users', u); return _login(login, pass); }
-    return false;
+    FIRE.mem = mem;
+    /* пароль уже проверил Firebase: общий вход получает одноразовый хэш только в памяти этой вкладки */
+    const all = await DB.all('users'), lg = String(login).trim().toLowerCase();
+    const u = all.find(x => mem.userId && x.id === mem.userId) || all.find(x => x.login && x.login.toLowerCase() === lg && x.active !== false);
+    if (!u || (u.login || '').toLowerCase() !== lg) { await FIRE.auth.signOut(); return false; }
+    u.salt = 'fb' + uid('s'); u.pass = await _hash(pass, u.salt); u.failCount = 0; delete u.lockedUntil;
+    if (!(await _login(login, pass)) || !this.user || (mem.userId && this.user.id !== mem.userId)) { this.user = null; sessionStorage.removeItem('addall2_uid'); await FIRE.auth.signOut(); return false; }
+    if (mem.role && ROLES[mem.role]) this.user.role = mem.role;
+    if (mem.admin) FIRE.sync().catch(() => { });
+    return true;
   };
   const _restore = Auth.restore.bind(Auth);
-  Auth.restore = async function () { if (FIRE.signedIn()) return _restore(); };
+  Auth.restore = async function () {
+    if (!FIRE.signedIn() || !sessionStorage.getItem('addall2_uid')) return;
+    let mem = null; try { mem = (await FIRE.fs.doc('members/' + FIRE.auth.currentUser.uid).get()).data(); } catch (e) { }
+    if (!mem || !mem.active) { sessionStorage.removeItem('addall2_uid'); return; }
+    FIRE.mem = mem;
+    /* номер пользователя в вкладке нельзя подменить: он берётся из записи участника */
+    if (mem.userId) sessionStorage.setItem('addall2_uid', mem.userId);
+    await _restore();
+    if (this.user && mem.role && ROLES[mem.role]) this.user.role = mem.role;
+    if (this.user && mem.admin) FIRE.sync().catch(() => { });
+  };
+  /* проверка своего пароля (смена пароля и подтверждения) через Firebase, без хэша в базе */
+  checkOwnPass = async (u, pass) => { try { const cu = FIRE.auth.currentUser; await cu.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(cu.email, pass)); return true; } catch (e) { return false; } };
+  /* при входе администратора: убрать старые хэши паролей из базы и записать роли в записи участников */
+  FIRE.sync = async function () {
+    if (FIRE._synced) return; FIRE._synced = true;
+    for (const x of await DB.all('users')) {
+      if (!x || x.id === '_boot') continue;
+      /* роль задаёт запись участника; у старых записей без роли «администратор» без флага администратора не принимается */
+      if (x.fireUid) {
+        let m = null; try { m = (await FIRE.fs.doc('members/' + x.fireUid).get()).data(); } catch (e) { }
+        if (m) {
+          const r = typeof m.role === 'string' && ROLES[m.role] ? m.role : x.role === 'admin' && !m.admin ? 'viewer' : (ROLES[x.role] ? x.role : 'viewer');
+          x.role = r;
+          if (m.role !== r || m.userId !== x.id) { try { await FIRE.fs.doc('members/' + x.fireUid).set({ role: r, userId: x.id }, { merge: true }); } catch (e) { } }
+        }
+      }
+      if (x.id !== Auth.user?.id) { try { await DB.rawPut('users', x); } catch (e) { } }
+    }
+  };
   Auth.logout = async function () {
     if (this.user) { try { await DB.rawPut('audit', { id: uid('au_'), ts: nowISO(), user: this.user.id, userName: this.user.name, action: 'выход', store: 'users', recId: this.user.id }); } catch (e) { } }
     FIRE.stop(); try { await FIRE.auth.signOut(); } catch (e) { }

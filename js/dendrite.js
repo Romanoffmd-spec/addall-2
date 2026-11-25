@@ -194,12 +194,13 @@ const _login2 = Pages.login;
 Pages.login = async function (mode = 'login', ...args) {
   await _login2.call(Pages, mode, ...args);
   const box = $('.auth-box'); if (!box) return;
+  /* счётчики только в локальной копии: на сайте и сервере данные до входа закрыты, там были бы нули */
   if (mode === 'login') {
-    const [us, pts] = await Promise.all([DB.all('users'), DB.all('patients')]);
-    $('.auth-brand', box).nextElementSibling?.insertAdjacentHTML('afterend', `<div class="lcount"><div><b>${us.filter(u => u.active !== false).length}</b><span>зарегистрировано сотрудников</span></div><div><b>${pts.length}</b><span>пациентов в регистрах</span></div></div>`);
+    const [us, pts] = location.protocol === 'file:' ? await Promise.all([DB.all('users'), DB.all('patients')]) : [null, null];
+    if (us) $('.auth-brand', box).nextElementSibling?.insertAdjacentHTML('afterend', `<div class="lcount"><div><b>${us.filter(u => u.active !== false).length}</b><span>зарегистрировано сотрудников</span></div><div><b>${pts.length}</b><span>пациентов в регистрах</span></div></div>`);
     /* на сайте и сервере вход в учебный режим только изнутри, после входа: кнопка на странице входа есть лишь в локальной копии */
     const showTrain = TRAIN || !/^https?:$/.test(location.protocol);
-    box.insertAdjacentHTML('beforeend', `<p class="fhint" style="text-align:center">Вводите пароль внимательно: после 3 неудачных попыток вход блокируется на 15 минут.</p>${showTrain ? `<button class="linkbtn" id="trTgl">${TRAIN ? 'Выйти из учебного режима' : 'Учебный режим (вымышленные пациенты)'}</button>` : '<p class="fhint" style="text-align:center">Учебный режим открывается после входа: меню «Учебный режим».</p>'}`);
+    box.insertAdjacentHTML('beforeend', `<p class="fhint" style="text-align:center">${typeof FIRE === 'object' && FIRE.on ? 'Вводите пароль внимательно: после нескольких неудачных попыток вход временно блокируется.' : 'Вводите пароль внимательно: после 3 неудачных попыток вход блокируется на 15 минут.'}</p>${showTrain ? `<button class="linkbtn" id="trTgl">${TRAIN ? 'Выйти из учебного режима' : 'Учебный режим (вымышленные пациенты)'}</button>` : '<p class="fhint" style="text-align:center">Учебный режим открывается после входа: меню «Учебный режим».</p>'}`);
     if ($('#trTgl')) $('#trTgl').onclick = () => setTraining(!TRAIN);
   }
   if (TRAIN) box.insertAdjacentHTML('afterbegin', '<div class="trainflag">Учебный режим</div>');
