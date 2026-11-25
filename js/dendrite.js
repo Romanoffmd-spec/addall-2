@@ -392,13 +392,16 @@ const SYN = {
     const date = today();
     const people = [];
     const center = Auth.user.center || reg.center || centers()[0] || '';
+    /* сценарий «несколько учреждений»: разные по объёму учебные больницы для экрана сравнения */
+    const pool = scenario === 'multi' ? [['Учебная больница А', .45], ['Учебная больница Б', .3], ['Учебная больница В', .15], ['Учебная больница Г', .1]] : null;
+    const pickCenter = () => { let r = Math.random(); for (const [c, w] of pool) { if ((r -= w) < 0) return c; } return pool[0][0]; };
     for (let i = 0; i < n; i++) {
       const sex = Math.random() < .5 ? 'М' : 'Ж';
       const genderedName = this.rnd(this.ln) + (sex === 'Ж' ? 'а' : '');
       const id = uid('tp_');
       people.push(await DB.put('patients', {
         id, registryId: reg.id, localId: 'T-' + id.slice(3), lastName: genderedName + ' (учебный)', firstName: this.rnd(this.fn[sex]),
-        sex, birthDate: addDays(date, -this.rint(6600, 31000)), consent: 'получено', vital: 'жив', center, data: {}, synthetic: true
+        sex, birthDate: addDays(date, -this.rint(6600, 31000)), consent: 'получено', vital: 'жив', center: pool ? pickCenter() : center, data: {}, synthetic: true
       }, 'учебный пациент'));
     }
 
@@ -462,7 +465,7 @@ Routes.training = async (main, regId = '') => {
       ${regs.length ? `<div class="row" id="trControls">
         <label for="trReg">Регистр</label><select class="inp" id="trReg">${regs.map(reg => `<option value="${esc(reg.id)}" ${selected === reg.id ? 'selected' : ''}>${esc(reg.name)}</option>`).join('')}<option value="__all">Все учебные регистры</option></select>
         <label for="trN">Пациентов на регистр</label><input class="inp" type="number" id="trN" value="25" min="1" max="500" style="max-width:100px">
-        <label for="trScenario">Сценарий</label><select class="inp" id="trScenario"><option value="regular">Обычное наблюдение</option><option value="quality">Учебная проверка качества</option></select>
+        <label for="trScenario">Сценарий</label><select class="inp" id="trScenario"><option value="regular">Обычное наблюдение</option><option value="quality">Учебная проверка качества</option><option value="multi">Несколько учреждений (для сравнения)</option></select>
         <button class="btn primary" id="trMake">Сгенерировать</button></div>` : '<a class="btn primary" href="#registries/new">Создать регистр</a>'}</div>
     <div class="card"><h3>Учебные данные</h3><div class="row"><button class="btn danger" id="trClr">Очистить пациентов</button><button class="btn" id="trSync">Добавить схемы из рабочей базы</button></div></div>` : ''}`;
   $('#trGo', main).onclick = () => setTraining(!TRAIN);
