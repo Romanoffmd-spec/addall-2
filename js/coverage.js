@@ -4,8 +4,9 @@
 const Coverage = {
   /* эпизоды (случаи) за период: каждое сохранённое событие выбранного типа; два события одного пациента это два эпизода */
   episodes(reg, patients, events, filter) {
-    const people = new Set(patients.filter(p => p.registryId === reg.id && (!filter.center || p.center === filter.center)).map(p => p.id));
-    const inPeriod = e => e.date >= filter.from && e.date <= filter.to && people.has(e.patientId);
+    const people = new Map(patients.filter(p => p.registryId === reg.id).map(p => [p.id, p]));
+    const inPeriod = e => e.date >= filter.from && e.date <= filter.to && people.has(e.patientId)
+      && (!filter.center || (e.episodeCenter ?? people.get(e.patientId).center) === filter.center);
     if (filter.eventType === Episodes.PATIENT) return Episodes.list(reg, events, patients).filter(inPeriod);
     return events.filter(event => event.registryId === reg.id && event.type === filter.eventType && event.status !== 'черновик' && inPeriod(event));
   },
@@ -83,7 +84,7 @@ Routes.coverage = async (main, regId = '') => {
     if (!valid()) { box.innerHTML = ''; return; }
     const seq = ++followSeq;
     const f = await Coverage.followup(reg, patients, events, filter);
-    if (seq !== followSeq) return;
+    if (seq !== followSeq || !box.isConnected) return;
     box.innerHTML = !f.lines.length
       ? `<p class="muted">Для этого события нет ожидаемых форм. Укажите в конструкторе (Формы событий, «Настроить»), какие формы ожидаются в каждом эпизоде и через сколько дней, например патоморфология через 30 дней.</p>`
       : `<p>Случаев за период: <b>${f.total}</b>.</p><table class="tbl"><thead><tr><th>Что ожидается</th><th>Есть</th><th>Нет, срок наступил</th><th>Срок не наступил</th></tr></thead><tbody>
@@ -99,7 +100,9 @@ Routes.coverage = async (main, regId = '') => {
       ? `В регистре: ${observed}. ${Coverage.estimate(observed, latest?.expected)}`
       : 'Выберите событие и проверьте границы периода.';
     renderFollow();
-    if (valid()) Recon.render($('#rcCard', main), reg, patients, events, filter, canSave);
+    const reconciliation = $('#rcCard', main);
+    if (valid()) Recon.render(reconciliation, reg, patients, events, { ...filter }, canSave);
+    else { Recon.rendering.delete(reconciliation); reconciliation.replaceChildren(); }
     $('#covHistory', main).innerHTML = list.length ? `<table class="tbl"><thead><tr><th>Дата сверки</th><th>В источнике</th><th>Источник и отбор</th></tr></thead><tbody>
       ${list.map(item => `<tr><td>${fmtDT(item.createdAt)}</td><td>${esc(item.expected)}</td><td>${esc(item.source)}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">За выбранный период сверок пока нет.</p>';

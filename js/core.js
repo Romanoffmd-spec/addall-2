@@ -49,6 +49,24 @@ function bindRichPaste(editor) {
 const nowISO = () => new Date().toISOString();
 const localDateISO = (d) => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
 const today = () => localDateISO(new Date());
+function calendarDay(value) {
+  if (typeof value !== 'string' || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value)) return '';
+  const day = new Date(value);
+  return Number.isFinite(day.getTime()) && day.toISOString().slice(0, 10) === value ? value : '';
+}
+function clinicalTime(value) {
+  return typeof value === 'string' && /^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?$/.test(value) ? value : '';
+}
+function clinicalDateTime(value) {
+  if (typeof value !== 'string') return '';
+  const match = value.trim().match(/^([0-9]{4}-[0-9]{2}-[0-9]{2})[T ](.+)$/);
+  return match && calendarDay(match[1]) && clinicalTime(match[2]) ? match[1] + 'T' + match[2] : '';
+}
+function clinicalDay(value) {
+  const text = String(value ?? '').trim();
+  const m = text.match(/^([0-9]{1,2})[./-]([0-9]{1,2})[./-]([0-9]{4})$/);
+  return calendarDay(m ? m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0') : text);
+}
 const fmtDate = (d) => {
   if (!d) return '';
   const x = new Date(d);
@@ -78,7 +96,11 @@ function download(name, content, mime = 'text/plain') {
 }
 
 function toCSV(rows, cols) {
-  const q = (v) => { v = v == null ? '' : Array.isArray(v) ? v.join('; ') : String(v); return /[",;\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const q = value => {
+    const text = value == null ? '' : Array.isArray(value) ? value.join('; ') : String(value);
+    const cell = typeof value !== 'number' && /^(?:\s*[=+@-]|\t|\r)/.test(text) ? "'" + text : text;
+    return /[",;\r\n]/.test(cell) ? '"' + cell.replace(/"/g, '""') + '"' : cell;
+  };
   return '﻿' + [cols.map(c => q(c.label)).join(';'), ...rows.map(r => cols.map(c => q(r[c.key])).join(';'))].join('\n');
 }
 
@@ -100,8 +122,8 @@ function parseCSV(text) {
 }
 
 /* ---------- хранилище (IndexedDB) ---------- */
-const DB_VERSION = 6;
-const STORES = ['users', 'registries', 'patients', 'events', 'mdt', 'proms', 'audit', 'settings', 'saved', 'queries', 'trials', 'alloc', 'screening', 'journals', 'jrecs', 'files', 'comments', 'refs', 'docs', 'doctpl', 'coverage', 'tasks', 'recon', 'releases'];
+const DB_VERSION = 7;
+const STORES = ['users', 'registries', 'patients', 'events', 'mdt', 'proms', 'audit', 'settings', 'saved', 'queries', 'trials', 'alloc', 'screening', 'journals', 'jrecs', 'files', 'comments', 'refs', 'docs', 'doctpl', 'coverage', 'tasks', 'recon', 'releases', 'periodApprovals'];
 /* учебный режим: отдельная база-песочница с вымышленными пациентами */
 const TRAIN = (() => { try { return localStorage.getItem('addall2.mode') === 'train'; } catch (e) { return false; } })();
 const DB = {
@@ -139,6 +161,11 @@ const DB = {
   async put(store, obj, action) {
     const before = obj.id ? await this.get(store, obj.id) : null;
     if (!obj.id) obj.id = uid(store.slice(0, 2) + '_');
+    if (store === 'events' && obj.patientId && before?.episodeCenter == null && obj.episodeCenter == null) {
+      const patient = await this.get('patients', obj.patientId);
+      if (patient) obj.episodeCenter = patient.center || '';
+    }
+    if (store === 'patients') obj.enrollmentCenter = before?.enrollmentCenter ?? before?.center ?? obj.center ?? '';
     obj.updatedAt = nowISO(); obj.updatedBy = Auth.user?.id || null;
     if (!before) { obj.createdAt = obj.createdAt || obj.updatedAt; obj.createdBy = obj.createdBy || obj.updatedBy; }
     if (typeof FIRE !== 'undefined' && FIRE.on && store === 'patients' && !obj.seq) {
@@ -256,13 +283,13 @@ function modal(html, { wide = false, full = false, onClose } = {}) {
 }
 function confirmBox(text) {
   return new Promise(res => {
-    const m = modal(`<h3>Подтверждение</h3><p>${esc(text)}</p><div class="row end"><button class="btn" data-a="0">Отмена</button><button class="btn danger" data-a="1">Да</button></div>`);
+    const m = modal(`<h3>Подтверждение</h3><p>${esc(text)}</p><div class="row end"><button class="btn" data-a="0">Отмена</button><button class="btn danger" data-a="1">Да</button></div>`, { onClose: () => res(false) });
     m.querySelectorAll('[data-a]').forEach(b => b.onclick = () => { m.remove(); res(b.dataset.a === '1'); });
   });
 }
 function promptBox(title, value = '') {
   return new Promise(res => {
-    const m = modal(`<h3>${esc(title)}</h3><input class="inp" id="pb" value="${esc(value)}"><div class="row end"><button class="btn" data-a="0">Отмена</button><button class="btn primary" data-a="1">OK</button></div>`);
+    const m = modal(`<h3>${esc(title)}</h3><input class="inp" id="pb" value="${esc(value)}"><div class="row end"><button class="btn" data-a="0">Отмена</button><button class="btn primary" data-a="1">OK</button></div>`, { onClose: () => res(null) });
     const i = m.querySelector('#pb'); i.focus(); i.select();
     i.onkeydown = e => { if (e.key === 'Enter') { m.remove(); res(i.value); } };
     m.querySelectorAll('[data-a]').forEach(b => b.onclick = () => { m.remove(); res(b.dataset.a === '1' ? i.value : null); });
@@ -309,17 +336,18 @@ async function navGroups() {
   return [
     { id: 'home', t: 'Главная', r: 'home' },
     { id: 'work', t: 'Работа', items: [
+      typeof DocumentInbox !== 'undefined' && DocumentInbox.available() && { r: 'inbox', t: 'Документы из хранилища' },
       can('mdt') && { r: 'mdt', t: 'МДК / консилиумы', i: '◎' },
       { sep: 'Журналы' }, ...journals.sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name)).map(j => ({ r: 'journal/' + j.id, t: j.name, i: j.icon || '▦' })),
       can('design') && { r: 'journals', t: 'Создать журнал', i: '+', add: true },
-      { sep: 'Контроль' }, { r: 'queries', t: 'Запросы по данным', i: '⚑', badge: openQ }, { r: 'me', t: 'Мои задачи', i: '☑' }] },
+      { sep: 'Контроль' }, typeof NET !== 'undefined' && NET.on && { r: 'registrywork', t: 'Работа с качеством регистра' }, { r: 'queries', t: 'Запросы по данным', i: '⚑', badge: openQ }, { r: 'me', t: 'Мои задачи', i: '☑' }] },
     { id: 'patients', t: 'Пациенты', r: 'patients', cnt: pts.filter(p => typeof visibleP !== 'function' || visibleP(p)).length },
     { id: 'regs', t: 'Регистры', items: [...regs.sort((a, b) => a.name.localeCompare(b.name)).flatMap(r => [{ r: 'patients/' + r.id, t: r.name, i: '▤', cnt: pts.filter(p => p.registryId === r.id).length, tag: r.status === 'на одобрении' ? 'на одобрении' : '' },
       ...(r.lists || []).map(l => ({ r: 'list/' + r.id + '/' + l.id, t: l.name, i: '↳', d: 1 }))]),
       { sep: '' }, can('design') ? { r: 'registries', t: 'Регистры и конструктор', i: '⚙' } : { r: 'registries', t: 'Все регистры', i: '▤' }, { r: 'registries/new', t: can('design') ? 'Создать регистр' : 'Предложить регистр', i: '+', add: true }] },
     { id: 'sci', t: 'Наука', items: [{ r: 'trials', t: 'Исследования', i: '⚖' }, can('proms') && { r: 'proms', t: 'Анкеты (PROMs)', i: '✎' }, can('analyse') && { r: 'analytics', t: 'Аналитика', i: '◭' }, can('analyse') && { r: 'report', t: 'Годовой отчёт', i: '▣' },
       { sep: 'Материалы' }, { r: 'writing', t: 'Рукописи', i: '✍' }, { r: 'library', t: 'Литература', i: '❝' }, { r: 'dictionary', t: 'Словарь данных', i: '§' }, { r: 'quality', t: 'Качество данных', i: '✓' }] },
-    { id: 'adm', t: 'Администрирование', items: [can('users') && { r: 'admin', t: 'Пользователи и настройки', i: '⚙' }, can('export') && { r: 'io', t: 'Импорт и экспорт', i: '⇅' }, can('audit') && { r: 'audit', t: 'Журнал аудита', i: '⌚' }, can('design') && { r: 'doctpl', t: 'Шаблоны документов', i: '▧' }] }
+    { id: 'adm', t: 'Администрирование', items: [can('users') && typeof NET !== 'undefined' && NET.on && { r: 'admin-center', t: 'Кабинет администратора', i: '⚙' }, can('users') && { r: 'admin', t: 'Пользователи и настройки', i: '⚙' }, can('export') && { r: 'io', t: 'Импорт и экспорт', i: '⇅' }, can('audit') && { r: 'audit', t: 'Журнал аудита', i: '⌚' }, can('design') && { r: 'doctpl', t: 'Шаблоны документов', i: '▧' }] }
   ].map(g => g.items ? { ...g, items: g.items.filter(Boolean) } : g).filter(g => !g.items || g.items.some(x => x.r));
 }
 const initials = (n) => String(n || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join('').toUpperCase();
@@ -464,8 +492,10 @@ const Bell = {
 /* доступ к регистрам: администратор видит всё; остальные: регистры своего отделения (в своём центре),
    регистры, открытые всему учреждению, свои, те, куда пригласили, и выданные администратором */
 const REGS = new Map();
-function regAccess(r) {
-  const u = Auth.user; if (!u || !r) return null; if (u.role === 'admin') return 'admin';
+function regAccess(r, u = Auth.user) {
+  if (!u || !r || u.active === false) return null;
+  if (u.role === 'admin') return 'admin';
+  if ((r.deniedMembers || []).includes(u.id)) return null;
   if (r.createdBy === u.id || r.proposedBy === u.id) return 'owner';
   if ((r.members || []).includes(u.id)) return 'member';
   if ((u.regAccess || []).includes(r.id)) return 'grant';
@@ -476,7 +506,7 @@ function regAccess(r) {
   return null;
 }
 function regAllowed(x) { if (Auth.user?.role === 'admin') return true; const r = typeof x === 'string' ? REGS.get(x) : x; return !!regAccess(r); }
-function regManage(r) { const u = Auth.user; if (!u || !r) return false; if (u.role === 'admin' || r.createdBy === u.id) return true; return u.role === 'lead' && !!r.dept && r.dept === u.dept && (!(typeof NET !== 'undefined' && NET.on) || (r.center || '') === (u.center || '')); }
+function regManage(r) { const u = Auth.user; if (!u || !r) return false; if (u.role === 'admin') return true; if ((r.deniedMembers || []).includes(u.id)) return false; if (r.createdBy === u.id) return true; return u.role === 'lead' && !!r.dept && r.dept === u.dept && (!(typeof NET !== 'undefined' && NET.on) || (r.center || '') === (u.center || '')); }
 async function loadRegs() {
   const all = await DB.all('registries'); let users = null;
   for (const r of all) if (!r.dept) {

@@ -142,6 +142,29 @@ Chart.funnel = function (title, pts, target, { mode = 'p', phi = 1 } = {}) {
   return this.frame(title, g);
 };
 
+/* Exact Poisson interval for observed / expected. */
+Stats.oeInterval = function (observed, expected) {
+  if (!Number.isInteger(observed) || observed < 0 || !(expected > 0)) return null;
+  const quantile = (df, probability) => {
+    let low = 0, high = Math.max(1, df * 2);
+    while (this.chi2p(high, df) > 1 - probability) high *= 2;
+    for (let index = 0; index < 55; index++) {
+      const middle = (low + high) / 2;
+      if (this.chi2p(middle, df) > 1 - probability) low = middle;
+      else high = middle;
+    }
+    return (low + high) / 2;
+  };
+  return [observed ? quantile(2 * observed, 0.025) / (2 * expected) : 0, quantile(2 * (observed + 1), 0.975) / (2 * expected)];
+};
+
+Stats.riskProbability = function (raw, format) {
+  if (raw == null || raw === '' || typeof raw === 'boolean') return null;
+  const value = Number(raw);
+  const probability = format === 'percent' ? value / 100 : value;
+  return Number.isFinite(probability) && probability >= 0 && probability <= 1 ? probability : null;
+};
+
 /* Классификация точки funnel plot по HQIP (2017): за 95% (2 SD) предупреждение, за 99,8% (3 SD) тревога */
 Stats.funnelFlag = function (p, target, mode, phi = 1) {
   const x = mode === 'r' ? p.e : p.n, y = mode === 'r' ? p.y / p.e : p.y / p.n;

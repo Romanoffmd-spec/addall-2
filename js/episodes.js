@@ -25,17 +25,17 @@ const Episodes = {
         for (const e of own) {
           if (e.type !== anchorType || !e.date || e.status === 'черновик') continue;
           const was = first.get(e.patientId);
-          if (!was || e.date < was.date) first.set(e.patientId, { id: 'pt:' + e.patientId, patientId: e.patientId, date: e.date, patient: true, anchorEventId: e.id, ownerId: e.ownerId || e.createdBy });
+          if (!was || e.date < was.date) first.set(e.patientId, { id: 'pt:' + e.patientId, patientId: e.patientId, date: e.date, patient: true, anchorEventId: e.id, episodeCenter: e.episodeCenter, externalEncounterId: e.externalEncounterId, ownerId: e.ownerId || e.createdBy });
         }
       }
       for (const e of own) {
         if (!e.date || e.status === 'черновик') continue;
         if (anchorType && first.get(e.patientId)?.anchorEventId) continue;
         const was = first.get(e.patientId);
-        if (!was || e.date < was.date) first.set(e.patientId, { id: 'pt:' + e.patientId, patientId: e.patientId, date: e.date, patient: true, ownerId: e.ownerId || e.createdBy });
+        if (!was || e.date < was.date) first.set(e.patientId, { id: 'pt:' + e.patientId, patientId: e.patientId, date: e.date, patient: true, episodeCenter: e.episodeCenter, externalEncounterId: e.externalEncounterId, ownerId: e.ownerId || e.createdBy });
       }
       for (const p of patients || []) {
-        if ((!p.registryId || p.registryId === reg.id) && !first.has(p.id) && p.createdAt) first.set(p.id, { id: 'pt:' + p.id, patientId: p.id, date: String(p.createdAt).slice(0, 10), patient: true, ownerId: p.createdBy });
+        if ((!p.registryId || p.registryId === reg.id) && !first.has(p.id) && p.createdAt) first.set(p.id, { id: 'pt:' + p.id, patientId: p.id, date: String(p.createdAt).slice(0, 10), patient: true, episodeCenter: p.enrollmentCenter, ownerId: p.createdBy });
       }
       return [...first.values()].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
     }
@@ -69,10 +69,12 @@ const Episodes = {
       const anchor = e.anchorEventId && byId.get(e.anchorEventId);
       if (anchor && anchor.patientId === e.patientId) {
         if (openerIds.has(anchor.id)) { out.set(e.id, anchor.id); continue; }
-        const viaAnchor = byDate(anchor);
+        const viaAnchor = e.externalEncounterId ? null : byDate(anchor);
         if (viaAnchor) { out.set(e.id, viaAnchor); continue; }
       }
-      const id = byDate(e);
+      const matching = e.externalEncounterId && (byPatient.get(e.patientId) || []).filter(opener =>
+        opener.externalEncounterId === e.externalEncounterId && (!e.episodeCenter || e.episodeCenter === opener.episodeCenter));
+      const id = matching ? matching.length === 1 ? matching[0].id : null : byDate(e);
       if (id) out.set(e.id, id);
     }
     return out;
@@ -96,6 +98,13 @@ const Episodes = {
     const opener = this.opener(reg);
     return (reg.eventTypes || []).filter(et => et.id !== opener && this.rule(et));
   },
+  /* записи с внешним номером эпизода, которого нет ни у одного эпизода пациента (опечатка или эпизод ещё не внесён):
+     такие записи не привязываются наугад и не должны молча выпадать из расчётов, поэтому их показываем как ошибку */
+  orphans(reg, events) {
+    const link = this.link(reg, events);
+    return events.filter(e => (!e.registryId || e.registryId === reg.id) && e.externalEncounterId && e.type !== this.opener(reg)
+      && e.status !== 'черновик' && !link.has(e.id));
+  },
   /* подпись эпизода для выбора в форме */
   title(reg, ep, index) { return `${index + 1}. ${this.openerName(reg)} от ${fmtDate(ep.date)}`; }
 };
@@ -113,6 +122,7 @@ const FollowQ = {
     const own = events.filter(e => !e.registryId || e.registryId === reg.id);
     const episodes = opts.episodes || Episodes.list(reg, own, patients);
     const link = Episodes.link(reg, own);
+    const people = new Map(patients.map(patient => [patient.id, patient]));
     const marks = new Map((tasks || []).filter(t => t.registryId === reg.id).map(t => [this.key(t.episodeId, t.typeId, t.due), t]));
     const out = [];
     for (const et of Episodes.expected(reg)) {
@@ -137,6 +147,9 @@ const FollowQ = {
         }
         /* привязка к сроку, которого больше нет (например, исправили дату начала), не теряет запись: она подбирается по дате */
         const linked = e => e.followDue && dues.includes(e.followDue);
+        const person = people.get(ep.patientId);
+        const deathBefore = due => person?.vital === 'умер' && calendarDay(person.deathDate) && due > person.deathDate;
+        let diedSeen = false;
         for (let k = 0; k < dues.length; k++) {
           const due = dues[k];
           /* сначала запись, явно привязанная к этому сроку (заполнена из очереди), затем подходящая по дате */
@@ -152,12 +165,19 @@ const FollowQ = {
           let state;
           if (match && match.status !== 'черновик') state = 'done';
           else if (mark?.status === 'na') state = 'na';
+          else if (deathBefore(due)) {
+            /* смерть это известный исход, а не «не применимо»: первая оценка после смерти остаётся задачей
+               (внести исход «умер»), иначе умерший без формы выпал бы из знаменателя и летальность оказалась бы ниже настоящей.
+               Только последующие повторные сроки после смерти действительно неприменимы. */
+            state = rule.mode === 'by' ? (due > t0 ? 'wait' : match ? 'partial' : 'overdue') : diedSeen ? 'na' : 'died';
+            if (rule.mode !== 'by') diedSeen = true;
+          }
           else if (mark?.status && this.REASONS[mark.status]) state = 'reason';
           else if (due > t0) state = 'wait';
           else if (match) state = 'partial';
           else if (daysBetween(due, t0) <= rule.window) state = 'open';
           else state = 'overdue';
-          out.push({ reg, ep, et, k, due, state, event: match, mark, late: Math.max(0, daysBetween(addDays(due, rule.window), t0)) });
+          out.push({ reg, ep, et, k, due, state, event: match, mark, assignedTo: mark?.assignedTo || ep.ownerId || ep.createdBy || '', late: Math.max(0, daysBetween(addDays(due, rule.window), t0)) });
         }
       }
     }
@@ -174,7 +194,7 @@ const FollowQ = {
       else if (x.state === 'na') s.na++;
       else if (x.state === 'reason') s.reason++;
       else if (x.state === 'partial') s.partial++;
-      else s.missing++;
+      else { s.missing++; if (x.state === 'died') s.died = (s.died || 0) + 1; }
     }
     return [...byType.values()].map(s => ({ ...s, due: s.done + s.missing + s.partial + s.reason }));
   }

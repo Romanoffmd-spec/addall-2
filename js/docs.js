@@ -174,7 +174,7 @@ const PFiles = {
     const up = $('#pfUp', root); if (up) up.onchange = async () => { for (const f of up.files) await DB.put('files', { patientId: p.id, name: f.name, type: f.type, size: f.size, blob: f }, 'загрузка файла'); toast('Загружено'); App.route(); };
     $$('[data-fo]', root).forEach(a => a.onclick = async () => { const f = await DB.get('files', a.dataset.fo); window.open(URL.createObjectURL(f.blob), '_blank'); });
     $$('[data-fd]', root).forEach(b => b.onclick = async () => { if (await confirmBox('Удалить файл?')) { await DB.del('files', b.dataset.fd); App.route(); } });
-    $$('[data-fai]', root).forEach(b => b.onclick = async () => { const f = await DB.get('files', b.dataset.fai); AI.fullParse(reg, p, new File([f.blob], f.name, { type: f.type })); });
+    $$('[data-fai]', root).forEach(b => b.onclick = async () => { const f = await DB.get('files', b.dataset.fai); AI.fullParse(reg, p, new File([f.blob], f.name, { type: f.type }), f.id); });
     const ca = $('#pcA', root); if (ca) ca.onclick = async () => { const t = $('#pcT', root).value.trim(); if (!t) return; await DB.put('comments', { patientId: p.id, text: t, name: Auth.user.name }, 'комментарий'); App.route(); };
   }
 };

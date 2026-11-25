@@ -11,17 +11,22 @@ const AI = {
     const name = file.name.toLowerCase();
     if (name.endsWith('.txt') || name.endsWith('.csv') || name.endsWith('.md') || file.type.startsWith('text/')) return { text: await file.text() };
     if (name.endsWith('.docx')) return { text: await this.docxText(file) };
-    if (name.endsWith('.pdf')) { const out = { pdf: await this.b64(file) }; try { out.text = await this.pdfText(file); } catch (e) { console.warn('pdf text', e); } return out; }
+    if (name.endsWith('.pdf')) { const out = { pdf: await this.b64(file) }; try { out.pages = await this.pdfPages(file); out.text = out.pages.join('\n\n').trim(); } catch (e) { console.warn('pdf text', e); } return out; }
     if (file.type.startsWith('image/')) return { image: await this.b64(file), mime: file.type };
     throw new Error('Формат не поддерживается: используйте DOCX, TXT, PDF или фото документа');
   },
   /* текст из PDF локально (pdf.js), без отправки куда-либо */
-  async pdfText(file) {
+  async pdfPages(file) {
     if (!window.pdfjsLib) await new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'lib/pdf.min.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
     const lib = window.pdfjsLib; lib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
-    const pdf = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise; let out = '';
-    for (let i = 1; i <= Math.min(pdf.numPages, 60); i++) { const pg = await pdf.getPage(i); const tc = await pg.getTextContent(); out += tc.items.map(x => x.str + (x.hasEOL ? '\n' : ' ')).join('') + '\n\n'; }
-    return out.replace(/[ \t]+\n/g, '\n').trim();
+    const pdf = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise;
+    const pages = [];
+    for (let i = 1; i <= Math.min(pdf.numPages, 60); i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      pages.push(content.items.map(item => item.str + (item.hasEOL ? '\n' : ' ')).join('').trim());
+    }
+    return pages;
   },
   b64(file) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); }); },
   /* DOCX = ZIP; достаём word/document.xml без внешних библиотек */
@@ -47,21 +52,9 @@ const AI = {
   },
 
   /* ---------- схема для модели ---------- */
-  schemaOf(fields, users) {
-    return fields.filter(f => f.type !== 'calc').map(f => {
-      const d = { key: f.key, label: f.label, type: f.type };
-      if (f.unit) d.unit = f.unit;
-      if (['select', 'multiselect'].includes(f.type)) d.allowed = f.options;
-      if (f.type === 'complist') { d.format = '[{"name": "осложнение", "grade": "I|II|IIIa|IIIb|IVa|IVb|V", "date": "YYYY-MM-DD или пусто"}]'; d.suggested_names = f.options; }
-      if (f.type === 'yesno') d.allowed = ['да', 'нет', 'неизвестно'];
-      if (f.type === 'date') d.format = 'YYYY-MM-DD';
-      if (f.type === 'user') d.allowed = users.filter(u => u.active !== false).map(u => u.name);
-      if (f.def) d.definition = f.def;
-      return d;
-    });
-  },
+  schemaOf(fields, users) { return DocumentSchema.fields(fields, users); },
   prompt(title, schema, dateLabel) {
-    return `Ты помощник хирургического регистра. Извлеки из медицинского документа значения для формы «${title}».
+    return `Ты помощник клинического регистра. Извлеки из медицинского документа значения для формы «${title}».
 Правила:
 - Заполняй поле только если значение прямо указано в документе или однозначно следует из текста. Не угадывай. Нет данных: не включай поле.
 - Для полей с "allowed" используй строго одно из разрешённых значений (для multiselect массив из них).
@@ -109,22 +102,90 @@ ${JSON.stringify(schema)}
   /* ---------- нормализация ответа под поля ---------- */
   normalize(fields, users, raw) {
     const out = {}, skipped = [];
-    const byKey = Object.fromEntries(fields.map(f => [f.key, f]));
-    const pickOpt = (opts, v) => { const s = String(v).trim().toLowerCase(); return opts.find(o => o.toLowerCase() === s) || opts.find(o => o.toLowerCase().startsWith(s) || s.startsWith(o.toLowerCase())); };
-    Object.entries(raw || {}).forEach(([k, v]) => {
-      const f = byKey[k]; if (!f || f.type === 'calc' || v == null || v === '' || (Array.isArray(v) && !v.length)) return;
-      let val = v;
-      if (f.type === 'number') { val = FX.num(v); if (val == null) return skipped.push(f.label); }
-      if (f.type === 'date') { val = String(v).slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) return skipped.push(f.label); }
-      if (f.type === 'select') { val = pickOpt(f.options, v); if (!val) return skipped.push(`${f.label}: «${v}» нет в списке`); }
-      if (f.type === 'multiselect') { val = [].concat(v).map(x => pickOpt(f.options, x)).filter(Boolean); if (!val.length) return; }
-      if (f.type === 'yesno') { val = /^(да|yes|true|1)$/i.test(String(v)) ? 'да' : /^(нет|no|false|0)$/i.test(String(v)) ? 'нет' : 'неизвестно'; }
-      if (f.type === 'user') { const s = String(v).toLowerCase(); const u = users.find(x => x.name.toLowerCase() === s) || users.find(x => s && x.name.toLowerCase().split(' ')[0] === s.split(' ')[0]); if (!u) return skipped.push(`${f.label}: «${v}» нет среди пользователей`); val = u.id; }
-      if (f.type === 'complist') { val = [].concat(v).filter(x => x && x.name).map(x => ({ name: String(x.name), grade: CD_GRADES.includes(x.grade) ? x.grade : 'I', date: /^\d{4}-\d{2}-\d{2}$/.test(x.date || '') ? x.date : '' })); if (!val.length) return; }
-      if (f.type === 'text' || f.type === 'textarea') val = String(v);
-      out[k] = val;
-    });
+    const byKey = new Map(fields.map(f => [f.key, f]));
+    const normalized = value => String(value).trim().toLowerCase();
+    const pickOpt = (options, value) => options?.find(option => normalized(option) === normalized(value));
+    for (const [key, value] of Object.entries(raw || {})) {
+      const field = byKey.get(key);
+      if (!field || field.type === 'calc' || isEmpty(value)) continue;
+      let result = value;
+      switch (field.type) {
+        case 'number':
+          result = FX.num(value);
+          if (result != null && (!validNumericStep(field, result) || (!isEmpty(field.min) && result < Number(field.min))
+            || (!isEmpty(field.max) && result > Number(field.max)))) result = null;
+          break;
+        case 'date':
+          result = calendarDay(value);
+          break;
+        case 'time':
+          result = clinicalTime(value);
+          break;
+        case 'datetime':
+          result = clinicalDateTime(value);
+          break;
+        case 'select':
+          result = pickOpt(field.options, value);
+          break;
+        case 'multiselect': {
+          const picks = [].concat(value).map(option => pickOpt(field.options, option));
+          result = picks.every(option => option != null) ? [...new Set(picks)] : null;
+          break;
+        }
+        case 'yesno':
+          result = /^(да|yes|true|1)$/i.test(String(value)) ? 'да' : /^(нет|no|false|0)$/i.test(String(value)) ? 'нет'
+            : /^(неизвестно|unknown)$/i.test(String(value)) ? 'неизвестно' : null;
+          break;
+        case 'user': {
+          const matches = users.filter(user => user.active !== false && (user.id === value || normalized(user.name) === normalized(value)));
+          result = matches.length === 1 ? matches[0].id : null;
+          break;
+        }
+        case 'complist': {
+          const entries = [].concat(value);
+          if (entries.some(entry => !entry?.name || !CD_GRADES.includes(entry.grade) || (entry.date && !calendarDay(entry.date)))) {
+            skipped.push(field.label + ': уточните степень и дату осложнений');
+            continue;
+          }
+          result = entries.map(entry => ({ name: String(entry.name), grade: entry.grade, date: entry.date || '' }));
+          break;
+        }
+        case 'text':
+        case 'textarea':
+          result = ['number', 'string'].includes(typeof value) ? String(value) : null;
+          break;
+      }
+      if (isEmpty(result)) skipped.push(field.label + ': значение требует проверки');
+      else Object.defineProperty(out, key, { value: result, enumerable: true, configurable: true, writable: true });
+    }
     return { out, skipped };
+  },
+
+  eventDate: calendarDay,
+
+  documentSource(doc, text, file) {
+    return !text || text === doc.text?.trim() ? file : {};
+  },
+
+  fieldEvidence(values, quotes, source, doc = {}) {
+    const simplify = text => String(text).normalize('NFKC').replace(/\s+/g, ' ').trim();
+    const text = simplify(doc.text || '');
+    const evidence = [];
+    for (const [key, value] of Object.entries(values)) {
+      const quote = quotes?.[key];
+      if (typeof quote === 'string' && quote.trim()) {
+        const excerpt = simplify(quote);
+        if (text && !text.includes(excerpt)) continue;
+        const page = doc.pages?.findIndex(pageText => simplify(pageText).includes(excerpt));
+        evidence.push([key, { quote: quote.trim(), value, ...source, verified: !!text && !doc.ocrPages?.includes((page ?? -1) + 1), ...(source.fileName && page >= 0 ? { page: page + 1 } : {}) }]);
+      }
+    }
+    return Object.fromEntries(evidence);
+  },
+
+  matchingEvidence(values, evidence) {
+    return Object.fromEntries(Object.entries(evidence || {}).filter(([key, item]) =>
+      item?.quote && Object.hasOwn(values, key) && JSON.stringify(values[key]) === JSON.stringify(item.value)));
   },
 
   /* ---------- окно «из документа» ---------- */
@@ -138,8 +199,17 @@ ${JSON.stringify(schema)}
       <div class="row between"><div class="row"><input type="file" id="ai_f" accept=".docx,.txt,.pdf,image/*"><span class="muted" id="ai_fn"></span></div>
       <div class="row"><label class="chip"><input type="checkbox" id="ai_ow">перезаписывать уже заполненные поля</label><button class="btn primary" id="ai_go">Извлечь</button></div></div>
       <div id="ai_res"></div>`, { wide: true });
-    let doc = {};
-    $('#ai_f', m).onchange = async e => { try { const f = e.target.files[0]; doc = await this.readFile(f); if (doc.text) $('#ai_t', m).value = doc.text; $('#ai_fn', m).textContent = doc.pdf ? 'PDF загружен' : doc.image ? 'Изображение загружено' : 'Текст извлечён'; } catch (er) { toast(er.message, 'err'); } };
+    let doc = {}, file = {};
+    $('#ai_f', m).onchange = async e => {
+      const selected = e.target.files[0];
+      if (!selected) return;
+      try {
+        doc = await this.readFile(selected);
+        file = { fileName: selected.name };
+        $('#ai_t', m).value = doc.text || '';
+        $('#ai_fn', m).textContent = doc.pdf ? 'PDF загружен' : doc.image ? 'Изображение загружено' : 'Текст извлечён';
+      } catch (error) { toast(error.message, 'err'); }
+    };
     $('#ai_go', m).onclick = async () => {
       const text = $('#ai_t', m).value.trim(); const d = { ...doc, text: text || doc.text };
       if (!d.text && !d.pdf && !d.image) return toast('Вставьте текст или загрузите файл', 'err');
@@ -147,18 +217,26 @@ ${JSON.stringify(schema)}
       try {
         const raw = this.parse(await this.call(this.prompt(title, this.schemaOf(fields, users), dateLabel), d));
         const { out, skipped } = this.normalize(fields, users, raw.fields);
+        const date = dateLabel ? this.eventDate(raw.event_date) : '';
+        const source = this.documentSource(doc, text, file);
+        const evidence = this.fieldEvidence(out, raw.evidence, source, { text: d.text, pages: source.fileName ? d.pages : null });
         const keys = Object.keys(out);
-        $('#ai_res', m).innerHTML = `<h3>Найдено полей: ${keys.length}</h3><table class="tbl small"><tbody>${raw.event_date && dateLabel ? `<tr><td><b>${esc(dateLabel)}</b></td><td>${fmtDate(raw.event_date)}</td><td></td></tr>` : ''}${keys.map(k => { const f = fields.find(x => x.key === k); return `<tr><td><label class="chip"><input type="checkbox" data-take="${k}" checked><b>${esc(f.label)}</b></label></td><td>${showVal(f, out[k], users)}</td><td class="muted">${esc(raw.evidence?.[k] || '')}</td></tr>`; }).join('')}</tbody></table>
+        $('#ai_res', m).innerHTML = `<h3>Найдено полей: ${keys.length}</h3><table class="tbl small"><tbody>${dateLabel ? `<tr><td><b>${esc(dateLabel)}</b></td><td>${date ? fmtDate(date) : 'Дата не найдена'}</td><td></td></tr>` : ''}${keys.map(k => { const f = fields.find(x => x.key === k); return `<tr><td><label class="chip"><input type="checkbox" data-take="${k}" checked><b>${esc(f.label)}</b></label></td><td>${showVal(f, out[k], users)}</td><td class="muted">${esc(evidence[k]?.quote || (raw.evidence?.[k] ? 'Цитата не найдена' : ''))}</td></tr>`; }).join('')}</tbody></table>
           ${skipped.length || (raw.warnings || []).length ? `<div class="miss">Не подставлено или под сомнением: ${esc([...skipped, ...(raw.warnings || [])].join('; '))}</div>` : ''}
           <div class="row end"><button class="btn primary" id="ai_ok">Подставить в форму</button></div>`;
-        $('#ai_ok', m).onclick = () => { const take = {}; $$('[data-take]:checked', m).forEach(c => take[c.dataset.take] = out[c.dataset.take]); onApply(take, /^\d{4}-\d{2}-\d{2}$/.test(raw.event_date || '') ? raw.event_date : null, $('#ai_ow', m).checked); m.close(); Audit.log('ИИ-заполнение', 'events', '-', null, null); };
+        $('#ai_ok', m).onclick = () => {
+          const take = Object.fromEntries($$('[data-take]:checked', m).map(input => [input.dataset.take, out[input.dataset.take]]));
+          onApply(take, date || null, $('#ai_ow', m).checked, this.matchingEvidence(take, evidence));
+          m.close();
+          Audit.log('ИИ-заполнение', 'events', '-', null, null);
+        };
       } catch (er) { $('#ai_res', m).innerHTML = `<div class="card err">${esc(er.message)}${/fetch|network|Failed/i.test(er.message) ? '<br>Проверьте, что модель запущена и доступна. Для Ollama задайте переменную окружения OLLAMA_ORIGINS=* и перезапустите Ollama.' : ''}</div>`; }
       btn.disabled = false; btn.textContent = 'Извлечь';
     };
   },
 
   /* ---------- разбор целого документа на пациента и несколько событий ---------- */
-  async fullParse(reg, patient, preFile) {
+  async fullParse(reg, patient, preFile, sourceFileId) {
     if (!this.ready()) return this.dialog({ title: '', fields: [], users: [] });
     const users = await Data.users();
     const core = [F('localId', 'Номер истории болезни'), F('lastName', 'Фамилия'), F('firstName', 'Имя'), F('middleName', 'Отчество'), F('birthDate', 'Дата рождения', 'date'), F('sex', 'Пол', 'select', { options: ['М', 'Ж'] }), F('phone', 'Телефон')];
@@ -166,52 +244,95 @@ ${JSON.stringify(schema)}
       <p class="muted">Выписка, протоколы, гистология, МРТ: ИИ сам определит, какие события регистра «${esc(reg.name)}» описаны в документе, и заполнит их. Вы проверите всё перед сохранением. ${this.local() ? 'Модель локальная.' : '<b class="bad">Документ уйдёт во внешний сервис ИИ.</b>'}</p>
       <textarea class="inp" id="fp_t" rows="10" placeholder="Вставьте текст документа"></textarea>
       <div class="row between"><input type="file" id="fp_f" accept=".docx,.txt,.pdf,image/*"><button class="btn primary" id="fp_go">Разобрать</button></div><div id="fp_res"></div>`, { full: true });
-    let doc = {};
-    $('#fp_f', m).onchange = async e => { try { doc = await this.readFile(e.target.files[0]); if (doc.text) $('#fp_t', m).value = doc.text; } catch (er) { toast(er.message, 'err'); } };
-    if (preFile) { try { doc = await this.readFile(preFile); if (doc.text) $('#fp_t', m).value = doc.text; else $('#fp_t', m).placeholder = 'Файл «' + preFile.name + '» загружен'; } catch (er) { toast(er.message, 'err'); } }
+    let doc = {}, file = {};
+    const loadFile = async (selected, fileId) => {
+      if (!selected) return;
+      try {
+        doc = await this.readFile(selected);
+        file = { fileName: selected.name, ...(fileId ? { fileId } : {}) };
+        const input = $('#fp_t', m);
+        input.value = doc.text || '';
+        input.placeholder = 'Файл «' + selected.name + '» загружен';
+      } catch (error) { toast(error.message, 'err'); }
+    };
+    $('#fp_f', m).onchange = e => loadFile(e.target.files[0]);
+    if (preFile) await loadFile(preFile, sourceFileId);
     $('#fp_go', m).onclick = async () => {
-      const d = { ...doc, text: $('#fp_t', m).value.trim() || doc.text }; if (!d.text && !d.pdf && !d.image) return toast('Нужен текст или файл', 'err');
+      const text = $('#fp_t', m).value.trim();
+      const d = { ...doc, text: text || doc.text };
+      if (!d.text && !d.pdf && !d.image) return toast('Нужен текст или файл', 'err');
+      const source = this.documentSource(doc, text, file);
       const btn = $('#fp_go', m); btn.disabled = true; btn.textContent = 'ИИ читает документ…';
-      const schema = { patient: patient ? undefined : this.schemaOf([...core, ...(reg.patientFields || [])], users), event_types: reg.eventTypes.map(et => ({ type: et.id, name: et.name, date_meaning: et.dateLabel, repeatable: !et.single, fields: this.schemaOf(formFields(et), users) })) };
-      const prompt = `Ты помощник хирургического регистра «${reg.name}». Разбери медицинский документ на события регистра.
-Правила:
-- Используй только типы событий из списка. Создавай событие, только если документ его действительно описывает. Одно и то же событие не дублируй.
-- Заполняй поле, только если значение прямо указано или однозначно следует из текста. Не угадывай.
-- Для полей с "allowed" строго одно из значений (multiselect: массив). Даты YYYY-MM-DD. Числа без единиц.
-- Для каждого события дай дату (event_date) по смыслу date_meaning.
-Схема (JSON): ${JSON.stringify(schema)}
-Ответ: только JSON:
-{${patient ? '' : '"patient": {"код_поля": значение}, '}"events": [{"type": "код_типа", "event_date": "YYYY-MM-DD", "fields": {"код_поля": значение}, "evidence": {"код_поля": "цитата до 12 слов"}}], "warnings": ["..."]}`;
+      const prompt = DocumentSchema.extract(reg, users, patient ? null : [...core, ...(reg.patientFields || [])]);
       try {
         const raw = this.parse(await this.call(prompt, d));
         const pt = patient ? null : this.normalize([...core, ...(reg.patientFields || [])], users, raw.patient || {});
-        const evs = (raw.events || []).map(e => { const et = etById(reg, e.type); if (!et) return null; const n = this.normalize(formFields(et), users, e.fields); return { et, date: /^\d{4}-\d{2}-\d{2}$/.test(e.event_date || '') ? e.event_date : '', data: n.out, skipped: n.skipped, evidence: e.evidence || {} }; }).filter(Boolean);
+        const evs = (raw.events || []).flatMap(e => {
+          const et = etById(reg, e.type);
+          if (!et) return [];
+          const { out, skipped } = this.normalize(formFields(et), users, e.fields);
+          return [{ et, date: this.eventDate(e.event_date), data: out, skipped, evidence: this.fieldEvidence(out, e.evidence, source, { text: d.text, pages: source.fileName ? d.pages : null }) }];
+        });
         $('#fp_res', m).innerHTML = `${pt ? `<fieldset class="sec"><legend>Пациент</legend><div class="grid">${core.map(f => `<div class="fld"><label class="flab">${esc(f.label)}</label><input class="inp ${pt.out[f.key] ? 'aiv' : ''}" data-pc="${f.key}" value="${esc(pt.out[f.key] ?? '')}"></div>`).join('')}</div></fieldset>` : ''}
           ${evs.map((e, i) => `<fieldset class="sec" style="border-left:4px solid ${e.et.color}"><legend><label class="chip"><input type="checkbox" data-ei="${i}" checked><b>${esc(e.et.name)}</b></label></legend>
-            <div class="row"><label class="flab">${esc(e.et.dateLabel || 'Дата')}</label><input class="inp" type="date" data-ed="${i}" value="${esc(e.date)}"></div>
-            <table class="tbl small"><tbody>${Object.entries(e.data).map(([k, v]) => { const f = formFields(e.et).find(x => x.key === k); return `<tr><td><b>${esc(f.label)}</b></td><td class="aiv">${showVal(f, v, users)}</td><td class="muted">${esc(e.evidence[k] || '')}</td></tr>`; }).join('') || '<tr><td class="muted">поля не найдены</td></tr>'}</tbody></table>
+            <div class="row"><label class="flab" for="fp_date_${i}">${esc(e.et.dateLabel || 'Дата')}</label><input class="inp" type="date" id="fp_date_${i}" data-ed="${i}" value="${esc(e.date)}">${e.date ? '' : '<span class="fhint">Дата не найдена. Укажите её или снимите галочку с события.</span>'}</div>
+            <table class="tbl small"><tbody>${Object.entries(e.data).map(([k, v]) => { const f = formFields(e.et).find(x => x.key === k); return `<tr><td><b>${esc(f.label)}</b></td><td class="aiv">${showVal(f, v, users)}</td><td class="muted">${esc(e.evidence[k]?.quote || '')}</td></tr>`; }).join('') || '<tr><td class="muted">поля не найдены</td></tr>'}</tbody></table>
             ${e.skipped.length ? `<div class="miss">Не подставлено: ${esc(e.skipped.join('; '))}</div>` : ''}</fieldset>`).join('') || '<div class="card">ИИ не нашёл событий этого регистра в документе.</div>'}
           ${(raw.warnings || []).length ? `<div class="miss">${esc(raw.warnings.join('; '))}</div>` : ''}
           <div class="row end sticky-bottom"><button class="btn primary" id="fp_ok">Сохранить в регистр</button></div>`;
-        $('#fp_ok', m).onclick = async () => {
-          let p = patient;
-          if (!p) {
-            const v = k => $(`[data-pc="${k}"]`, m).value.trim();
-            if (!v('localId') || !v('lastName') || !/^\d{4}-\d{2}-\d{2}$/.test(v('birthDate')) || !['М', 'Ж'].includes(v('sex'))) return toast('Проверьте № ИБ, фамилию, дату рождения (ГГГГ-ММ-ДД) и пол (М/Ж)', 'err');
-            const ex = (await Data.patients(reg.id)).find(x => x.localId === v('localId'));
-            p = ex || await DB.put('patients', { registryId: reg.id, localId: v('localId'), lastName: v('lastName'), firstName: v('firstName'), middleName: v('middleName'), birthDate: v('birthDate'), sex: v('sex'), phone: v('phone'), center: Auth.user.center || '', data: Object.fromEntries((reg.patientFields || []).map(f => [f.key, pt.out[f.key]]).filter(x => x[1] != null)), consent: '' }, 'создание пациента (ИИ)');
+        const saveButton = $('#fp_ok', m);
+        saveButton.onclick = async () => {
+          const selected = [];
+          for (const [index, event] of evs.entries()) {
+            if (!$(`[data-ei="${index}"]`, m).checked) continue;
+            const input = $(`[data-ed="${index}"]`, m);
+            const date = this.eventDate(input.value);
+            if (!date) {
+              input.focus();
+              return toast('Укажите дату события «' + event.et.name + '» или снимите с него галочку', 'err');
+            }
+            selected.push({ ...event, date });
           }
-          const existing = (await Data.events(reg.id)).filter(x => x.patientId === p.id);
-          let created = 0, merged = 0;
-          for (let i = 0; i < evs.length; i++) {
-            if (!$(`[data-ei="${i}"]`, m).checked) continue;
-            const e = evs[i], date = $(`[data-ed="${i}"]`, m).value || today();
-            const same = existing.find(x => x.type === e.et.id && (e.et.single || x.date === date));
-            if (same) { if (same.locked) continue; Object.entries(e.data).forEach(([k, v]) => { if (isEmpty(same.data?.[k])) same.data[k] = v; }); same.status = validateEvent(e.et, computeValues(reg, p, e.et, same.data, same.date)).length ? 'черновик' : 'завершено'; await DB.put('events', same, 'дополнение события (ИИ)'); merged++; }
-            else { await DB.put('events', { patientId: p.id, registryId: reg.id, type: e.et.id, date, data: e.data, status: validateEvent(e.et, computeValues(reg, p, e.et, e.data, date)).length ? 'черновик' : 'завершено', schemaVersion: reg.version, aiSource: true }, 'создание события (ИИ)'); created++; }
-          }
-          await Proms.autoSchedule(p, reg);
-          m.close(); toast(`Создано событий: ${created}, дополнено: ${merged}. Незаполненные обязательные поля сохранены как черновики.`); go('patient/' + p.id);
+          saveButton.disabled = true;
+          try {
+            let p = patient;
+            if (!p) {
+              const v = k => $(`[data-pc="${k}"]`, m).value.trim();
+              if (!v('localId') || !v('lastName') || !this.eventDate(v('birthDate')) || !['М', 'Ж'].includes(v('sex'))) return toast('Проверьте № ИБ, фамилию, дату рождения (ГГГГ-ММ-ДД) и пол (М/Ж)', 'err');
+              const ex = (await Data.patients(reg.id)).find(x => x.localId === v('localId'));
+              p = ex || await DB.put('patients', { registryId: reg.id, localId: v('localId'), lastName: v('lastName'), firstName: v('firstName'), middleName: v('middleName'), birthDate: v('birthDate'), sex: v('sex'), phone: v('phone'), center: Auth.user.center || '', data: Object.fromEntries((reg.patientFields || []).map(f => [f.key, pt.out[f.key]]).filter(x => x[1] != null)), consent: '' }, 'создание пациента (ИИ)');
+            }
+            const existing = (await Data.events(reg.id)).filter(x => x.patientId === p.id);
+            let created = 0, merged = 0;
+            for (const event of selected) {
+              const { et, date, data, evidence } = event;
+              const same = existing.find(x => x.type === et.id && (et.single || x.date === date));
+              if (same) {
+                if (same.locked) continue;
+                const accepted = Object.fromEntries(Object.entries(data).filter(([key]) => isEmpty(same.data?.[key])));
+                if (!Object.keys(accepted).length) continue;
+                const combined = { ...same.data, ...accepted };
+                const aiEvidence = { ...this.matchingEvidence(combined, same.aiEvidence), ...this.matchingEvidence(accepted, evidence) };
+                same.data = combined;
+                same.status = validateEvent(et, computeValues(reg, p, et, combined, same.date)).length ? 'черновик' : 'завершено';
+                if (Object.keys(aiEvidence).length) same.aiEvidence = aiEvidence;
+                else delete same.aiEvidence;
+                await DB.put('events', same, 'дополнение события (ИИ)');
+                merged++;
+              } else {
+                const status = validateEvent(et, computeValues(reg, p, et, data, date)).length ? 'черновик' : 'завершено';
+                const saved = await DB.put('events', { patientId: p.id, registryId: reg.id, type: et.id, date, data, status,
+                  schemaVersion: reg.version, aiSource: true, ...(Object.keys(evidence).length ? { aiEvidence: evidence } : {}) }, 'создание события (ИИ)');
+                existing.push(saved);
+                created++;
+              }
+            }
+            await Proms.autoSchedule(p, reg);
+            m.close();
+            toast(`Создано событий: ${created}, дополнено: ${merged}. Незаполненные обязательные поля сохранены как черновики.`);
+            go('patient/' + p.id);
+          } catch (error) { toast(error.message, 'err'); }
+          finally { saveButton.disabled = false; }
         };
       } catch (er) { $('#fp_res', m).innerHTML = `<div class="card err">${esc(er.message)}</div>`; }
       btn.disabled = false; btn.textContent = 'Разобрать';

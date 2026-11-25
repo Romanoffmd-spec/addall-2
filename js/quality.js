@@ -15,11 +15,12 @@ const QI = {
     return [Math.max(0, (c - h) * 100), Math.min(100, (c + h) * 100)];
   },
   n1(v) { return (Math.round(v * 10) / 10).toLocaleString(typeof LANG !== 'undefined' && LANG === 'en' ? 'en-US' : 'ru-RU'); },
-  hasTarget(i) { return i.target !== '' && i.target != null && !isNaN(Number(i.target)); },
+  hasTarget(i) { return (!i.kind || i.kind === 'proportion') && i.target !== '' && i.target != null && !isNaN(Number(i.target)); },
   tgtTxt(i) { return this.hasTarget(i) ? `цель ${i.lowerBetter ? '≤' : '≥'} ${i.target}%` : ''; },
 
   /* вывод: cls = ok | due | few | '' */
   verdict(i, x) {
+    if (x?.kind) return { cls: '', txt: RegistryMeasure.types[x.kind], key: 'measure' };
     if (!x || !x.den) return { cls: '', txt: x && x.miss ? 'поле показателя не заполнено' : 'пока нет случаев', key: 'none' };
     if (x.den < this.MIN_N) return { cls: 'few', txt: `мало случаев для вывода (нужно от ${this.MIN_N})`, key: 'few' };
     if (!this.hasTarget(i)) return { cls: '', txt: 'цель не задана', key: 'notgt' };
@@ -35,6 +36,8 @@ const QI = {
 
   /* плитка для главной */
   tile(reg, i, x, events, patients) {
+    if (x.kind) return `<button type="button" class="qi qi-btn" data-qi="${this.keep(reg, i, x, events, patients)}">
+      <span class="qi-l">${esc(i.name)}</span><b>${esc(RegistryMeasure.summary(x))}</b><span class="qi-v">${RegistryMeasure.types[x.kind]} · записей ${x.denIds.length}</span></button>`;
     const v = this.verdict(i, x), ci = x.den ? this.wilson(x.num, x.den) : null, k = this.keep(reg, i, x, events, patients);
     const big = !x.den ? '<b class="nd">нет данных</b>' : v.key === 'few' ? `<b class="qi-few">${x.num} из ${x.den}</b>` : `<b>${this.n1(x.pct)}%</b>`;
     const sub = !x.den ? '' : v.key === 'few' ? `<em>${this.n1(x.pct)}%, интервал слишком широкий</em>` : `<em>${x.num} из ${x.den} · 95% ДИ ${this.n1(ci[0])}-${this.n1(ci[1])}%</em>`;
@@ -48,6 +51,7 @@ const QI = {
 
   /* ячейка таблицы (аналитика, годовой отчёт, хирурги) */
   cell(reg, i, x, events, patients, opts = {}) {
+    if (x?.kind) return `<td><button class="btn xs" data-qi="${this.keep(reg, i, x, events, patients)}">${esc(RegistryMeasure.summary(x))}</button> · ${x.denIds.length}</td>`;
     if (!x || !x.den) return `<td class="muted">${x && x.miss ? `нет ответа: ${x.miss}` : 'нет данных'}</td>`;
     const v = this.verdict(i, x), ci = this.wilson(x.num, x.den), k = this.keep(reg, i, x, events, patients);
     const cls = v.cls === 'ok' ? 'good' : v.cls === 'due' ? 'bad' : '';
@@ -66,12 +70,19 @@ const QI = {
       return `<h4 style="margin:16px 0 6px">${title} <span class="muted">${rows.length}</span></h4>${hint ? `<p class="muted small" style="margin:0 0 6px">${hint}</p>` : ''}
         ${rows.length ? `<table class="tbl small"><tbody>${rows.map(r => `<tr><td><a href="#patient/${r.p ? r.p.id : ''}" data-close>${esc(r.p ? pname(r.p) : '?')}</a></td><td>${fmtDate(r.e.date)}</td><td class="muted">${esc(r.e.type !== ind.et ? 'нет формы «' + (etById(reg, ind.et)?.name || '') + '»' : r.e.status || '')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted small">нет</p>'}`;
     };
+    if (x.kind) {
+      const m = modal(`<h3>${esc(ind.name)}</h3><p>${esc(RegistryMeasure.summary(x))}</p>
+        ${list(x.denIds, 'Записи в расчёте')}${list(x.missIds, 'Не хватает данных')}`, { wide: true });
+      m.querySelectorAll('[data-close]').forEach(link => link.onclick = () => m.close());
+      return;
+    }
     const numIds = x.numIds || [], denIds = x.denIds || [];
     const restIds = denIds.filter(id => !numIds.includes(id));
     const m = modal(`<h3>${esc(ind.name)}</h3>
       <p class="muted">${esc(reg.name)} · расчёт на ${fmtDate(today())} · без поправки на риск</p>
       <div class="qi-sum"><b>${x.den ? this.n1(x.pct) + '%' : 'нет данных'}</b><span>${x.num} из ${x.den}${ci ? ` · 95% ДИ ${this.n1(ci[0])}-${this.n1(ci[1])}%` : ''}</span><span class="qi-v">${esc(v.txt)}${this.tgtTxt(ind) ? ' · ' + this.tgtTxt(ind) : ''}</span></div>
       ${x.miss ? list(x.missIds || [], x.noForm ? 'Нет ответа или нет формы' : 'Нет ответа в поле показателя', x.noForm ? `Эти случаи не вошли в расчёт. У ${x.noForm} эпизодов форма «${esc(etById(reg, ind.et)?.name || '')}» ещё не создана, хотя срок наступил: исход неизвестен.` : 'Эти случаи не вошли в расчёт. Заполните поле, чтобы цифра стала точнее.') : ''}
+      ${x.died ? list(x.diedIds || [], 'Умер до срока оценки, исход не внесён', 'Смерть это известный исход. Откройте случай и внесите исход, иначе показатель летальности будет занижен. Пока исход не внесён, случай считается пропуском.') : ''}
       ${x.reason ? list(x.reasonIds || [], 'Исход неизвестен, указана причина', 'Связаться не удалось, пациент отказался или наблюдается в другом центре. Причины видны в очереди наблюдения. В расчёт эти случаи не входят.') : ''}
       ${list(numIds, 'Событие наступило (числитель)')}
       ${list(restIds, 'Событие не наступило')}

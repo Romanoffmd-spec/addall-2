@@ -165,8 +165,8 @@ App.route = async function (...a) {
 /* ================= РЕГИСТРАЦИЯ: рабочая почта, телефон, делегат ================= */
 const FREE_MAIL = /@(gmail|googlemail|mail|inbox|list|bk|yandex|ya|hotmail|outlook|live|yahoo|icloud|me|rambler|proton|protonmail|aol)\./i;
 const _login4 = Pages.login;
-Pages.login = async function (mode = 'login') {
-  await _login4.call(Pages, mode);
+Pages.login = async function (mode = 'login', ...args) {
+  await _login4.call(Pages, mode, ...args);
   const box = $('.auth-box'); if (!box) return;
   /* справка до входа, как «гамбургер» у Dendrite */
   if (mode === 'login' || mode === 'reg') {
@@ -225,11 +225,12 @@ userDialog = async function (u, approving) {
   const ok = $('#u_ok', m); const orig = ok.onclick;
   ok.onclick = async () => {
     const want = $$('[data-dg]:checked', m).map(c => c.value); const ad = Number(Settings.data.accountDays || 0);
-    if (u && ad && !u.expiresAt && !$('#u_exp', m).value) $('#u_exp', m).value = addDays(today(), ad);
-    const login = $('#u_l', m).value.trim(); await orig();
-    const all = await DB.all('users'); const me = u ? all.find(x => x.id === u.id) : all.find(x => x.login === login);
+    if (ad && !u?.expiresAt && !$('#u_exp', m).value) $('#u_exp', m).value = addDays(today(), ad);
+    const login = $('#u_l', m).value.trim().normalize('NFKC').toLowerCase();
+    if (!await orig()) return;
+    const all = await DB.all('users');
+    const me = u ? all.find(x => x.id === u.id) : all.find(x => x.login?.normalize('NFKC').toLowerCase() === login);
     if (!me) return;
-    if (!u) { me.mustChange = true; if (ad && !me.expiresAt) me.expiresAt = addDays(today(), ad); await DB.rawPut('users', me); }
     for (const d of all.filter(x => ['admin', 'lead', 'surgeon'].includes(x.role))) {
       const has = (d.delegates || []).some(x => x.userId === me.id), need = want.includes(d.id);
       if (need && !has) { d.delegates = [...(d.delegates || []), { userId: me.id, at: nowISO(), confirmedAt: null, byAdmin: Auth.user.id }]; await DB.rawPut('users', d); }
@@ -338,4 +339,4 @@ if (LANG === 'en') {
 }
 /* переключатель языка на странице входа */
 const _login5 = Pages.login;
-Pages.login = async function (mode = 'login') { await _login5.call(Pages, mode); const box = $('.auth-box'); if (box && mode === 'login') { box.insertAdjacentHTML('beforeend', `<button class="linkbtn" id="lgLang">${LANG === 'en' ? 'Русский интерфейс' : 'English interface'}</button>`); $('#lgLang').onclick = () => setLang(LANG === 'en' ? 'ru' : 'en'); } };
+Pages.login = async function (mode = 'login', ...args) { await _login5.call(Pages, mode, ...args); const box = $('.auth-box'); if (box && mode === 'login') { box.insertAdjacentHTML('beforeend', `<button class="linkbtn" id="lgLang">${LANG === 'en' ? 'Русский интерфейс' : 'English interface'}</button>`); $('#lgLang').onclick = () => setLang(LANG === 'en' ? 'ru' : 'en'); } };

@@ -15,16 +15,47 @@ Routes.followup = async (main, regId = '') => {
   const items = FollowQ.build(reg, events, visible, tasks).filter(x => pById.has(x.ep.patientId));
   const st = Routes.followup.st ||= { tab: 'todo' };
   const groups = {
-    todo: x => ['overdue', 'open', 'partial'].includes(x.state),
+    todo: x => ['overdue', 'open', 'partial', 'died'].includes(x.state),
     soon: x => x.state === 'wait' && x.due <= addDays(today(), FollowQ.AHEAD),
     reason: x => x.state === 'reason' || x.state === 'na',
     done: x => x.state === 'done',
     all: () => true
   };
   const count = k => items.filter(groups[k]).length;
-  const label = { overdue: 'просрочено', open: 'можно заполнять', partial: 'только черновик', wait: 'срок не наступил', done: 'выполнено', reason: 'закрыто с причиной', na: 'не применимо' };
-  const cls = { overdue: 'badt', open: 'warnt', partial: 'warnt', wait: '', done: 'okt', reason: '', na: '' };
+  const label = { died: 'умер до срока: внесите исход', overdue: 'просрочено', open: 'можно заполнять', partial: 'только черновик', wait: 'срок не наступил', done: 'выполнено', reason: 'закрыто с причиной', na: 'не применимо' };
+  const cls = { died: 'badt', overdue: 'badt', open: 'warnt', partial: 'warnt', wait: '', done: 'okt', reason: '', na: '' };
   const userName = id => users.find(u => u.id === id)?.name || '';
+  const canAssign = can('users') || Auth.user.role === 'lead';
+  const taskRecord = x => ({ ...x.mark, id: x.mark?.id || 'follow:' + reg.id + ':' + x.ep.id + ':' + x.et.id + ':' + x.due,
+    registryId: reg.id, patientId: x.ep.patientId, episodeId: x.ep.id, typeId: x.et.id, due: x.due });
+  async function assign(rows) {
+    if (!rows.length) return toast('Выберите задачи', 'err');
+    const centers = new Set(rows.map(row => {
+      const patient = pById.get(row.ep.patientId);
+      return patient?.followupCenter || patient?.center || '';
+    }));
+    if (centers.size > 1) return toast('Выберите задачи одного учреждения', 'err');
+    const center = [...centers][0];
+    const staff = users.filter(user => user.active !== false && ['admin', 'lead', 'surgeon', 'resident'].includes(user.role)
+      && (!center || user.center === center));
+    const dialog = modal('<h3>Назначить ответственного</h3><p>Задач: ' + rows.length + '</p><select class="inp" id="fqAssignee"><option value="">Ответственный за эпизод</option>'
+      + staff.map(user => '<option value="' + esc(user.id) + '">' + esc(user.name) + '</option>').join('')
+      + '</select><div class="row end"><button class="btn primary" id="fqAssignSave">Сохранить</button></div>');
+    const save = $('#fqAssignSave', dialog);
+    save.onclick = async () => {
+      save.disabled = true;
+      let count = 0;
+      try {
+        for (const row of rows) {
+          await DB.put('tasks', { ...taskRecord(row), assignedTo: $('#fqAssignee', dialog).value }, 'назначение задачи наблюдения');
+          count++;
+        }
+        toast('Назначено задач: ' + count);
+      } catch (error) { toast('Назначено задач: ' + count + '. ' + error.message, 'err'); }
+      dialog.close();
+      App.route();
+    };
+  }
   const rules = Episodes.expected(reg);
 
   main.innerHTML = `<div class="head"><h1>Очередь наблюдения</h1>${regSelect(regs, reg.id, 'fqReg', false)}</div>
@@ -44,17 +75,20 @@ Routes.followup = async (main, regId = '') => {
 
   const draw = () => {
     const list = items.filter(groups[st.tab]).sort((a, b) => a.due.localeCompare(b.due));
-    $('#fqList', main).innerHTML = list.length ? `<table class="tbl hover"><thead><tr><th>Пациент</th><th>Что ожидается</th><th>Срок</th><th>Состояние</th><th>Ответственный</th><th></th></tr></thead><tbody>
+    $('#fqList', main).innerHTML = list.length ? `${canAssign ? '<div class="row"><button class="btn" id="fqAssignBatch">Назначить выбранные задачи</button></div>' : ''}<table class="tbl hover"><thead><tr>${canAssign ? '<th>Выбор</th>' : ''}<th>Пациент</th><th>Что ожидается</th><th>Срок</th><th>Состояние</th><th>Ответственный</th><th></th></tr></thead><tbody>
       ${list.map((x, i) => { const p = pById.get(x.ep.patientId); return `<tr>
+        ${canAssign ? `<td>${x.state !== 'done' && x.state !== 'na' ? `<input type="checkbox" aria-label="Выбрать задачу" data-fq-select="${i}">` : ''}</td>` : ''}
         <td><a href="#patient/${esc(p.id)}"><b>${esc(pname(p))}</b></a><div class="muted small">№ ИБ ${esc(p.localId || '')}</div></td>
         <td>${esc(x.et.name)}${Episodes.rule(x.et).every ? ` <span class="muted">· срок ${x.k + 1}</span>` : ''}<div class="muted small">${esc(Episodes.openerName(reg))} от ${fmtDate(x.ep.date)}</div></td>
         <td>${fmtDate(x.due)}</td>
-        <td><span class="tag ${cls[x.state]}">${label[x.state]}</span>${x.state === 'overdue' ? ` <span class="muted small">на ${x.late} дн.</span>` : ''}${x.mark ? `<div class="muted small">${esc(FollowQ.REASONS[x.mark.status] || '')}${x.mark.note ? ': ' + esc(x.mark.note) : ''}</div>` : ''}</td>
-        <td class="muted">${esc(userName(x.ep.ownerId || x.ep.createdBy))}</td>
+        <td><span class="tag ${cls[x.state]}">${label[x.state]}</span>${x.state === 'overdue' ? ` <span class="muted small">на ${x.late} дн.</span>` : ''}${x.mark?.status ? `<div class="muted small">${esc(FollowQ.REASONS[x.mark.status] || '')}${x.mark.note ? ': ' + esc(x.mark.note) : ''}</div>` : ''}</td>
+        <td class="muted">${esc(userName(x.assignedTo) || 'не назначен')} ${canAssign && x.state !== 'done' && x.state !== 'na' ? `<button class="btn xs" data-fq-assign="${i}">Назначить</button>` : ''}</td>
         <td class="row end">${x.state === 'done' ? `<button class="btn xs" data-open="${i}">Открыть</button>`
-          : `${can('enter') ? `<button class="btn xs primary" data-fill="${i}">${x.event ? 'Дополнить' : 'Заполнить'}</button>` : ''}${x.mark ? `<button class="btn xs" data-unmark="${i}">Вернуть в работу</button>` : can('enter') ? `<button class="btn xs" data-why="${i}">Причина</button>` : ''}`}</td></tr>`; }).join('')}</tbody></table>`
+          : `${can('enter') ? `<button class="btn xs primary" data-fill="${i}">${x.event ? 'Дополнить' : 'Заполнить'}</button>` : ''}${x.mark?.status ? `<button class="btn xs" data-unmark="${i}">Вернуть в работу</button>` : can('enter') ? `<button class="btn xs" data-why="${i}">Причина</button>` : ''}`}</td></tr>`; }).join('')}</tbody></table>`
       : emptyState('Задач нет.');
     const rows = list;
+    if ($('#fqAssignBatch', main)) $('#fqAssignBatch', main).onclick = () => assign($$('[data-fq-select]:checked', main).map(input => rows[+input.dataset.fqSelect]));
+    $$('[data-fq-assign]', main).forEach(button => button.onclick = () => assign([rows[+button.dataset.fqAssign]]));
     $$('[data-fq]', main).forEach(a => a.onclick = () => { st.tab = a.dataset.fq; $$('[data-fq]', main).forEach(b => { b.classList.toggle('on', b === a); b.setAttribute('aria-selected', b === a); }); draw(); });
     $$('[data-fill], [data-open]', $('#fqList', main)).forEach(b => b.onclick = () => {
       const x = rows[+(b.dataset.fill ?? b.dataset.open)];
@@ -70,14 +104,17 @@ Routes.followup = async (main, regId = '') => {
         <div class="row end"><button class="btn primary" id="fqOk">Сохранить</button></div>`);
       $('#fqOk', m).onclick = async () => {
         try {
-          await DB.put('tasks', { registryId: reg.id, patientId: x.ep.patientId, episodeId: x.ep.id, typeId: x.et.id, due: x.due, status: $('#fqWhy', m).value, note: $('#fqNote', m).value.trim() }, 'причина по задаче наблюдения');
+          await DB.put('tasks', { ...taskRecord(x), status: $('#fqWhy', m).value, note: $('#fqNote', m).value.trim() }, 'причина по задаче наблюдения');
         } catch (error) { return toast(error.message, 'err'); }
         m.close(); toast('Сохранено'); App.route();
       };
     });
     $$('[data-unmark]', $('#fqList', main)).forEach(b => b.onclick = async () => {
       const x = rows[+b.dataset.unmark];
-      try { await DB.del('tasks', x.mark.id); } catch (error) { return toast(error.message, 'err'); }
+      try {
+        if (x.mark.assignedTo) await DB.put('tasks', { ...x.mark, status: '', note: '' }, 'возврат задачи наблюдения');
+        else await DB.del('tasks', x.mark.id);
+      } catch (error) { return toast(error.message, 'err'); }
       App.route();
     });
   };

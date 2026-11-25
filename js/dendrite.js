@@ -191,8 +191,8 @@ Routes.admin = async (main) => {
 
 /* ================= СТРАНИЦА ВХОДА: счётчики, блокировка, учебный режим ================= */
 const _login2 = Pages.login;
-Pages.login = async function (mode = 'login') {
-  await _login2.call(Pages, mode);
+Pages.login = async function (mode = 'login', ...args) {
+  await _login2.call(Pages, mode, ...args);
   const box = $('.auth-box'); if (!box) return;
   if (mode === 'login') {
     const [us, pts] = await Promise.all([DB.all('users'), DB.all('patients')]);
@@ -342,10 +342,21 @@ const SYN = {
         const lo = f.min === '' || f.min == null ? (Number.isFinite(Number(f.max)) && f.max !== '' ? Math.min(0, Number(f.max) - 20) : 0) : Number(f.min);
         const hi = f.max === '' || f.max == null ? lo + 100 : Number(f.max);
         if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi < lo) return '';
+        const step = Number(f.step);
+        if (step > 0) {
+          const base = isEmpty(f.min) ? 0 : lo;
+          const count = ri(Math.ceil((lo - base) / step), Math.floor((hi - base) / step + 1e-8));
+          return Number((base + count * step).toFixed(10));
+        }
         const rounded = Math.round((lo + Math.random() * (hi - lo)) * 10) / 10;
         return Math.min(hi, Math.max(lo, rounded));
       }
       case 'date': return [addDays(date, ri(-7, 4)), today()].sort()[0];
+      case 'time':
+      case 'datetime': {
+        const clock = String(ri(8, 18)).padStart(2, '0') + ':' + String(ri(0, 59)).padStart(2, '0');
+        return f.type === 'time' ? clock : date + 'T' + clock;
+      }
       case 'user': return users.length ? r(users).id : '__ext';
       case 'icd10': return options.length ? r(options) : r(this.icd);
       case 'icdo': {
@@ -375,7 +386,7 @@ const SYN = {
     for (const f of fields) if (f.type === 'calc' && f.formula) values[f.key] = data[f.key] = evalFormula(f.formula, values);
     return Object.fromEntries(fields.filter(f => Object.hasOwn(data, f.key) && condOK(f.showIf, values)).map(f => [f.key, data[f.key]]));
   },
-  async make(reg, n) {
+  async make(reg, n, scenario = 'regular') {
     const users = (await Data.users()).filter(user => user.active !== false);
     const types = reg.eventTypes || [];
     const date = today();
@@ -393,20 +404,33 @@ const SYN = {
 
     const start = Out30.startType(reg);
     const outcome = Out30.form(reg, start);
-    for (const patient of people) {
+    const opener = Episodes.opener(reg);
+    const startType = Episodes.isPatient(reg) ? reg.episode?.anchorForm || types[0]?.id : opener;
+    for (const [patientIndex, patient] of people.entries()) {
       patient.data = this.fill(reg.patientFields || [], { date, users, people, patient });
       if (Object.keys(patient.data).length) await DB.put('patients', patient, 'поля учебного пациента');
-      let day = addDays(date, -this.rint(65, 720) - types.length * 25);
-      let anchor = null;
+      const longest = Math.max(0, ...Episodes.expected(reg).map(type => {
+        const rule = Episodes.rule(type);
+        return rule.days + rule.every;
+      }));
+      let day = addDays(date, -this.rint(30, 240) - longest - types.length * 25);
+      const startDate = addDays(day, types.findIndex(type => type.id === startType) * 14);
+      let anchor = null, episode = null;
       for (const type of types) {
-        const repeats = type.single === false && /наблюд|контрол|follow/i.test(type.name) ? this.rint(1, 3) : 1;
+        const rule = type.id !== startType && Episodes.rule(type);
+        const repeats = !type.single && rule?.every ? 2 : type.single === false && /наблюд|контрол|follow/i.test(type.name) ? this.rint(1, 3) : 1;
+        if (scenario === 'quality' && rule && patientIndex % 3 === 0) continue;
         for (let index = 0; index < repeats; index++) {
-          const eventDate = day <= date ? day : date;
+          const expected = rule ? addDays(episode?.date || startDate, rule.days + index * rule.every) : '';
+          const proposed = type.id === startType ? startDate : expected || day;
+          const eventDate = proposed <= date ? proposed : date;
           const data = this.fill(formFields(type), { date: eventDate, users, people, patient });
           const values = computeValues(reg, patient, type, data, eventDate);
-          const status = validateEvent(type, values).length ? 'черновик' : 'завершено';
+          const status = validateEvent(type, values).length || (scenario === 'quality' && rule && patientIndex % 3 === 1) ? 'черновик' : 'завершено';
           const record = { patientId: patient.id, registryId: reg.id, type: type.id, date: eventDate, data, status,
             schemaVersion: reg.version, ownerId: Auth.user.id, synthetic: true };
+          if (expected) record.followDue = expected;
+          if (episode && type.id !== startType && !Episodes.isPatient(reg)) record.anchorEventId = episode.id;
           if (outcome?.type.id === type.id && status !== 'черновик') {
             const opDate = outcome.inline ? eventDate : anchor?.date;
             if (opDate) {
@@ -417,6 +441,7 @@ const SYN = {
           }
           const saved = await DB.put('events', record, 'учебное событие');
           if (type.id === start) anchor = saved;
+          if (type.id === startType) episode = saved;
           day = addDays(day, this.rint(5, 25));
         }
       }
@@ -437,6 +462,7 @@ Routes.training = async (main, regId = '') => {
       ${regs.length ? `<div class="row" id="trControls">
         <label for="trReg">Регистр</label><select class="inp" id="trReg">${regs.map(reg => `<option value="${esc(reg.id)}" ${selected === reg.id ? 'selected' : ''}>${esc(reg.name)}</option>`).join('')}<option value="__all">Все учебные регистры</option></select>
         <label for="trN">Пациентов на регистр</label><input class="inp" type="number" id="trN" value="25" min="1" max="500" style="max-width:100px">
+        <label for="trScenario">Сценарий</label><select class="inp" id="trScenario"><option value="regular">Обычное наблюдение</option><option value="quality">Учебная проверка качества</option></select>
         <button class="btn primary" id="trMake">Сгенерировать</button></div>` : '<a class="btn primary" href="#registries/new">Создать регистр</a>'}</div>
     <div class="card"><h3>Учебные данные</h3><div class="row"><button class="btn danger" id="trClr">Очистить пациентов</button><button class="btn" id="trSync">Добавить схемы из рабочей базы</button></div></div>` : ''}`;
   $('#trGo', main).onclick = () => setTraining(!TRAIN);
@@ -453,7 +479,7 @@ Routes.training = async (main, regId = '') => {
     try {
       for (const [index, target] of targets.entries()) {
         make.textContent = `Создаю… ${index + 1} из ${targets.length}`;
-        total += await SYN.make(target, count);
+        total += await SYN.make(target, count, $('#trScenario', main).value);
       }
       toast(`Создано учебных пациентов: ${total}`);
       go(chosen === '__all' ? 'patients' : 'patients/' + targets[0].id);
@@ -587,13 +613,22 @@ Routes.mydata = async (main) => {
     <div class="grid"><div class="fld"><label class="flab">Регистр</label>${regSelect(regs, regs[0]?.id, 'mdReg', false)}</div>
       <div class="fld"><label class="flab">С</label><input class="inp" type="date" id="mdFrom"></div><div class="fld"><label class="flab">По</label><input class="inp" type="date" id="mdTo" value="${today()}"></div>
       <div class="fld"><label class="flab">Какие записи</label><select class="inp" id="mdScope"><option value="mine">мои (я владелец или вносил)</option>${can('export') ? '<option value="all">все доступные мне</option>' : ''}</select></div>
-      <div class="fld"><label class="flab">Персональные данные</label><select class="inp" id="mdPii"><option value="0">без ФИО (только № ИБ)</option><option value="1">с ФИО и датой рождения</option></select></div></div>
+      <div class="fld"><label class="flab">Персональные данные</label><select class="inp" id="mdPii"><option value="0">без прямых идентификаторов</option>${can('users') ? '<option value="1">с идентификаторами пациентов</option>' : ''}</select></div></div>
     <button class="btn primary" id="mdGo">Скачать Excel</button></div>
     <div class="card"><p class="muted small">Скачанный файл содержит данные пациентов. Храните его в защищённом месте учреждения и удаляйте, когда он больше не нужен.</p></div>`;
   $('#mdGo').onclick = async () => {
-    const ds = await loadReg($('#mdReg').value); const reg = ds.reg; const from = $('#mdFrom').value, to = $('#mdTo').value; const me = Auth.user.id; const pii = $('#mdPii').value === '1';
+    const ds = await loadReg($('#mdReg').value); const reg = ds.reg; const from = $('#mdFrom').value, to = $('#mdTo').value; const me = Auth.user.id; const pii = can('users') && $('#mdPii').value === '1';
     const ev = ds.events.filter(e => (!from || e.date >= from) && (!to || e.date <= to) && ($('#mdScope').value === 'all' || e.ownerId === me || e.createdBy === me));
     if (!ev.length) return toast('Нет записей за выбранный период', 'err');
+    if (!pii) {
+      const ids = new Set(ev.map(event => event.patientId));
+      const dataset = RegistryExport.assemble({ ...ds, events: ev, patients: ds.patients.filter(p => ids.has(p.id)) }, [],
+        { from, to, drafts: true, identified: false });
+      RegistryExport.downloadBundle(dataset, 'xlsx', slug(reg.name) + '_my_' + today());
+      await Audit.log('экспорт моих данных без прямых идентификаторов', 'registries', reg.id, null, null);
+      return;
+    }
+    if (!await confirmBox('В выгрузку войдут идентификаторы пациентов. Продолжить?')) return;
     const pIds = new Set(ev.map(e => e.patientId)); const P = ds.patients.filter(p => pIds.has(p.id));
     const sheets = [{ name: 'Пациенты', rows: [['ID', '№ ИБ', ...(pii ? ['Фамилия', 'Имя', 'Отчество', 'Дата рождения'] : ['Год рождения']), 'Пол', 'Центр', 'Статус', 'Дата смерти', ...(reg.patientFields || []).map(f => f.label)], ...P.map(p => [p.id, p.localId, ...(pii ? [p.lastName, p.firstName, p.middleName, p.birthDate] : [Number((p.birthDate || '').slice(0, 4)) || '']), p.sex, p.center || '', p.vital || '', p.deathDate || '', ...(reg.patientFields || []).map(f => valStr(f, p.data?.[f.key], ds.users))])] }];
     const groups = {};
@@ -841,8 +876,8 @@ Routes.me = async (main) => { await _me(main); const h = $('.head', main); if (h
 
 /* ================= РЕГИСТРАЦИЯ: делегат и обращение ================= */
 const _login3 = Pages.login;
-Pages.login = async function (mode = 'login') {
-  await _login3.call(Pages, mode);
+Pages.login = async function (mode = 'login', ...args) {
+  await _login3.call(Pages, mode, ...args);
   if (mode !== 'reg') return;
   const ln = $('#r_ln')?.closest('.grid'); if (ln) ln.insertAdjacentHTML('beforebegin', `<div class="fld" style="max-width:200px"><label class="flab">Обращение</label><select class="inp" id="r_tt"><option></option>${['Д-р', 'Проф.', 'Г-н', 'Г-жа'].map(o => `<option>${o}</option>`).join('')}</select></div>`);
   const rl = $('.roles'); if (rl) rl.nextElementSibling.insertAdjacentHTML('afterend', `<label class="chk" style="margin-top:6px"><input type="checkbox" id="r_dg"> <span>Я делегат: буду вносить данные за врача</span></label><div class="fld" id="r_dgw" style="display:none"><label class="flab">За какого врача (ФИО)</label><input class="inp" id="r_dgn"></div>`);
@@ -859,5 +894,5 @@ userDialog = async function (u, approving) {
   const m = [...document.querySelectorAll('.modal-wrap')].pop(); if (!m || !$('#u_ok', m)) return;
   $('#u_or', m).closest('.fld').insertAdjacentHTML('afterend', `<div class="fld"><label class="flab">Доступ действует до (пусто = бессрочно)</label><input class="inp" type="date" id="u_exp" value="${esc(u?.expiresAt || '')}"></div>`);
   const ok = $('#u_ok', m); const orig = ok.onclick;
-  ok.onclick = async () => { const exp = $('#u_exp', m).value; if (u) u.expiresAt = exp; const r = await orig(); if (!u && exp) { const all = await DB.all('users'); const nu = all.find(x => x.login === $('#u_l', m)?.value?.trim()); if (nu) { nu.expiresAt = exp; await DB.put('users', nu); } } return r; };
+  ok.onclick = async () => { const exp = $('#u_exp', m).value; if (u) u.expiresAt = exp; return orig(); };
 };

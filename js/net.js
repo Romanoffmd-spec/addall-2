@@ -55,9 +55,9 @@ if (NET.on) {
     async clear(store) { await NET.call('DELETE', 's/' + store); }
   });
   Auth.login = async function (login, pass) {
-    this.lastErr = '';
+    this.lastErr = ''; this.applicationNumber = '';
     const r = await NET.call('POST', 'login', { login, pass });
-    if (!r.ok) { this.lastErr = r.err || ''; if (r.lockedUntil) this.lockedUntil = r.lockedUntil; return false; }
+    if (!r.ok) { this.lastErr = r.err || ''; if (r.lockedUntil) this.lockedUntil = r.lockedUntil; this.applicationNumber = r.applicationNumber || ''; return false; }
     NET.setToken(r.token); const u = r.user;
     const pd = Number(Settings.data?.passDays || 0);
     if (pd && (!u.passChangedAt || addDays(u.passChangedAt.slice(0, 10), pd) < today())) u.mustChange = true;

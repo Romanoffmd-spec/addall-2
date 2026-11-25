@@ -66,6 +66,9 @@ Routes.analytics = async (main, regId = '') => {
 
   const c = st.cfg; const defEt = reg.keyDates?.start || reg.eventTypes[0].id;
   const outcomeUI = (pref) => `<label class="flab">Исход («случай»)</label><div class="row"><select class="inp" data-k="${pref}key">${fOpts(c.et || defEt, c[pref + 'key'])}</select><select class="inp" data-k="${pref}op">${Object.entries(OPS).map(([k, v]) => `<option value="${k}" ${c[pref + 'op'] === k ? 'selected' : ''}>${v}</option>`).join('')}</select><input class="inp" data-k="${pref}value" value="${esc(c[pref + 'value'] || '')}" placeholder="значение"></div>`;
+  const riskUnits = () => `<label class="flab">Единица поля риска</label><select class="inp" data-k="riskUnit">
+    <option value="">Как в словаре</option><option value="percent" ${c.riskUnit === 'percent' ? 'selected' : ''}>%</option>
+    <option value="fraction" ${c.riskUnit === 'fraction' ? 'selected' : ''}>доля 0–1</option></select>`;
   const drawCfg = () => {
     const t = st.type; c.et = c.et || defEt; let h = '';
     if (t === 'dist') h = `<label class="flab">Форма</label><select class="inp" data-k="et">${etOpts(c.et, true)}</select><label class="flab">Поле</label><select class="inp" data-k="field">${fOpts(c.et, c.field)}</select>`;
@@ -74,6 +77,7 @@ Routes.analytics = async (main, regId = '') => {
     if (t === 'km') h = `<label class="flab">Точка отсчёта</label><select class="inp" data-k="et">${etOpts(c.et)}</select><label class="flab">Конечная точка (дата события)</label><select class="inp" data-k="end">${dateFields.map(f => `<option value="${f.key}" ${c.end === f.key ? 'selected' : ''}>${esc(f.etName)} › ${esc(f.label)}</option>`).join('') || '<option value="">нет полей-дат</option>'}</select><label class="flab">Сравнить группы по</label><select class="inp" data-k="grp"><option value="">без групп</option><option value="_sex" ${c.grp === '_sex' ? 'selected' : ''}>Пол</option>${centers().length ? `<option value="_center" ${c.grp === '_center' ? 'selected' : ''}>Центр</option>` : ''}${fOpts(c.et, c.grp, ['select', 'yesno', 'user', 'calc'])}</select><div class="help">Цензурирование по дате последнего события пациента в регистре.</div>`;
     if (t === 'cusum') h = `<label class="flab">Форма</label><select class="inp" data-k="et">${etOpts(c.et)}</select>${outcomeUI('o')}<label class="flab">Ожидаемый риск (поле, % или 0–1)</label><select class="inp" data-k="risk"><option value="">нет: средняя частота когорты</option>${fOpts(c.et, c.risk, ['number', 'calc'])}</select><label class="flab">Хирург / группа</label><select class="inp" data-k="grp"><option value="">все вместе</option>${centers().length ? `<option value="_center" ${c.grp === '_center' ? 'selected' : ''}>Центр</option>` : ''}${fOpts(c.et, c.grp, ['user', 'select', 'text'])}</select><label class="flab">Значение группы</label><input class="inp" data-k="gval" value="${esc(c.gval || '')}" placeholder="пусто = все; для хирурга выберите после «Построить»"><div class="row"><div class="fld"><label class="flab">OR тревоги</label><input class="inp" type="number" step="0.1" data-k="or" value="${esc(c.or || 2)}"></div><div class="fld"><label class="flab">Порог h</label><input class="inp" type="number" step="0.1" data-k="h" value="${esc(c.h || 4.5)}"></div></div>`;
     if (t === 'funnel') h = `<label class="flab">Форма</label><select class="inp" data-k="et">${etOpts(c.et)}</select>${outcomeUI('o')}<label class="flab">Сравнивать по</label><select class="inp" data-k="grp">${centers().length ? `<option value="_center" ${c.grp === '_center' ? 'selected' : ''}>Центр</option>` : ''}${fOpts(c.et, c.grp, ['user', 'select', 'text'])}</select><label class="flab">Поправка на риск (поле ожидаемого риска)</label><select class="inp" data-k="risk"><option value="">без поправки</option>${fOpts(c.et, c.risk, ['number', 'calc'])}</select>`;
+    if (['cusum', 'funnel'].includes(t)) h += riskUnits();
     if (t === 'ind') h = `<p class="muted">Все показатели качества регистра по годам точки отсчёта.</p>`;
     if (t === 'compare') h = `<label class="flab">Форма</label><select class="inp" data-k="et">${etOpts(c.et)}</select><label class="flab">Числовой показатель</label><select class="inp" data-k="num">${fOpts(c.et, c.num, ['number', 'calc'])}</select><label class="flab">Группы</label><select class="inp" data-k="grp"><option value="_sex" ${c.grp === '_sex' ? 'selected' : ''}>Пол</option>${centers().length ? `<option value="_center" ${c.grp === '_center' ? 'selected' : ''}>Центр</option>` : ''}${fOpts(c.et, c.grp, ['select', 'yesno', 'user', 'calc'])}</select><div class="help">2 группы: критерий Манна-Уитни, 3 и более: Краскела-Уоллиса с попарными сравнениями (поправка Холма).</div>`;
     if (t !== 'ind') {
@@ -193,41 +197,58 @@ function runAnalysis(ds, st, out) {
     }
     if (st.type === 'cusum') {
       const o = outc('o'); if (!o.key) throw new Error('Задайте исход');
-      let rr = rows(c.et).filter(r => r.e.date).sort((a, b) => a.e.date.localeCompare(b.e.date));
+      let rr = rows(c.et).filter(r => r.e.date && (['empty', 'filled'].includes(o.op) || (!isEmpty(r.v[o.key]) && r.v[o.key] !== 'неизвестно')))
+        .sort((a, b) => a.e.date.localeCompare(b.e.date));
       const p0 = rr.length ? rr.filter(r => condOK(o, r.v)).length / rr.length : 0;
       const groupsAvail = c.grp ? [...new Set(rr.map(r => r.v[c.grp]).filter(v => !isEmpty(v)))] : [];
       if (c.grp && c.gval) rr = rr.filter(r => String(r.v[c.grp]) === String(c.gval) || valStr(fld(c.et, c.grp), r.v[c.grp], users) === c.gval);
-      const cases = rr.map(r => { let p = c.risk ? Number(r.v[c.risk]) : p0; if (c.risk && (isNaN(p) || r.v[c.risk] === '' || r.v[c.risk] == null)) p = p0; if (p > 1) p = p / 100; return { y: condOK(o, r.v) ? 1 : 0, p, date: r.e.date, pid: r.p.id }; });
+      const unit = c.riskUnit || (fld(c.et, c.risk)?.unit === '%' ? 'percent' : 'fraction');
+      const cases = rr.flatMap(r => {
+        const p = c.risk ? Stats.riskProbability(r.v[c.risk], unit) : p0;
+        return p == null ? [] : [{ y: condOK(o, r.v) ? 1 : 0, p, date: r.e.date, pid: r.p.id }];
+      });
+      if (!cases.length) throw new Error('Нет записей с известными исходом и риском');
+      const excludedRisk = rr.length - cases.length;
       const cs = Stats.racusum(cases, Number(c.or || 2), Number(c.h || 4.5)), vl = Stats.vlad(cases);
       const svg1 = Chart.line('RA-CUSUM (сигнал при превышении порога)', [{ pts: cs.pts.map(p => ({ x: p.i, y: p.S, mark: p.sig })) }], { xl: 'Номер случая', yl: 'S', hlines: [{ y: Number(c.h || 4.5), label: 'порог h' }], ymin: 0 });
       const svg2 = Chart.line('VLAD (ожидаемые минус наблюдаемые исходы)', [{ pts: vl.map(p => ({ x: p.i, y: p.v })) }], { xl: 'Номер случая', yl: 'E − O', hlines: [{ y: 0, c: '#888' }] });
       h = (groupsAvail.length ? `<div class="card"><b>Выберите группу:</b> ${groupsAvail.map(g => `<button class="btn xs" data-gsel="${esc(g)}">${esc(valStr(fld(c.et, c.grp), g, users))}</button>`).join(' ')} <button class="btn xs" data-gsel="">все</button></div>` : '') +
-        `<div class="card"><p>Случаев: <b>${cases.length}</b>, наблюдаемых исходов: <b>${cases.filter(x => x.y).length}</b>, ожидаемых: <b>${Math.round(cases.reduce((s, x) => s + x.p, 0) * 10) / 10}</b>. ${c.risk ? 'Ожидаемый риск из поля.' : `Риск не задан: используется средняя частота когорты ${Math.round(p0 * 1000) / 10}% (без поправки на риск).`} Сигналы: ${cs.signals.length ? `<b class="bad">на случаях ${cs.signals.join(', ')}</b>` : 'нет'}.</p></div>` +
+        `<div class="card"><p>Случаев: <b>${cases.length}</b>, наблюдаемых исходов: <b>${cases.filter(x => x.y).length}</b>, ожидаемых: <b>${Math.round(cases.reduce((s, x) => s + x.p, 0) * 10) / 10}</b>. ${c.risk ? 'Ожидаемый риск из поля.' + (excludedRisk ? ' Исключено без достоверного значения риска: ' + excludedRisk + '.' : '') : `Риск не задан: используется средняя частота когорты ${Math.round(p0 * 1000) / 10}% (без поправки на риск).`} Сигналы: ${cs.signals.length ? `<b class="bad">на случаях ${cs.signals.join(', ')}</b>` : 'нет'}.</p></div>` +
         chartBox('ra_cusum', svg1, cases.map((x, i) => ({ i: i + 1, date: x.date, y: x.y, p: Math.round(x.p * 1000) / 1000, S: Math.round(cs.pts[i].S * 1000) / 1000, vlad: Math.round(vl[i].v * 1000) / 1000 })), [{ key: 'i', label: '№' }, { key: 'date', label: 'Дата' }, { key: 'y', label: 'Исход' }, { key: 'p', label: 'Ожидаемый риск' }, { key: 'S', label: 'CUSUM' }, { key: 'vlad', label: 'VLAD' }]) + chartBox('vlad', svg2);
       setTimeout(() => $$('[data-gsel]', out).forEach(b => b.onclick = () => { c.gval = b.dataset.gsel; const inp = $('[data-k=gval]'); if (inp) inp.value = c.gval; runAnalysis(ds, st, out); }), 0);
     }
     if (st.type === 'funnel') {
       const o = outc('o'); if (!o.key || !c.grp) throw new Error('Задайте исход и группировку');
-      const rr = rows(c.et); const g = {}; let noRisk = 0;
-      const riskOf = (r) => { let p = Number(r.v[c.risk]); if (isNaN(p) || r.v[c.risk] == null || r.v[c.risk] === '') return null; return p > 1 ? p / 100 : p; };
-      rr.forEach(r => { const k = r.v[c.grp]; if (isEmpty(k)) return; let p = null; if (c.risk) { p = riskOf(r); if (p == null) { noRisk++; return; } }
-        g[k] = g[k] || { n: 0, y: 0, e: 0 }; g[k].n++; if (condOK(o, r.v)) g[k].y++; if (p != null) g[k].e += p; });
+      const rr = rows(c.et); const g = Object.create(null); let noRisk = 0, noOutcome = 0, brier = 0;
+      const unit = c.riskUnit || (fld(c.et, c.risk)?.unit === '%' ? 'percent' : 'fraction');
+      rr.forEach(r => {
+        const k = c.grp === '_center' ? r.e.episodeCenter ?? r.v[c.grp] : r.v[c.grp];
+        if (isEmpty(k)) return;
+        if (!['empty', 'filled'].includes(o.op) && (isEmpty(r.v[o.key]) || r.v[o.key] === 'неизвестно')) { noOutcome++; return; }
+        const p = c.risk ? Stats.riskProbability(r.v[c.risk], unit) : null;
+        if (c.risk && p == null) { noRisk++; return; }
+        const observed = Number(condOK(o, r.v));
+        const group = g[k] ||= { n: 0, y: 0, e: 0 };
+        group.n++;
+        group.y += observed;
+        if (p != null) { group.e += p; brier += (p - observed) ** 2; }
+      });
       const mode = c.risk ? 'r' : 'p';
       const N = Object.values(g).reduce((s, x) => s + x.n, 0), Y = Object.values(g).reduce((s, x) => s + x.y, 0), p0 = N ? Y / N : 0, target = mode === 'r' ? 1 : p0;
       const f = fld(c.et, c.grp); const anon = Settings.data.anonCodes !== false && (f?.type === 'user' || c.grp === '_center');
       const cl = centers(); const ccode = (k) => k === Auth.user.center ? 'Мой центр' : 'Ц' + (cl.indexOf(k) + 1 || '?');
       let pts_ = Object.entries(g).filter(([k, v]) => mode === 'p' || v.e > 0).map(([k, v]) => { const u = users.find(x => x.id === k);
         const label = !anon ? valStr(f, k, users) : c.grp === '_center' ? ccode(k) : (u?.id === Auth.user.id ? 'Я' : (u?.code || '?'));
-        return { label, n: v.n, y: v.y, e: v.e }; });
+        return { label, n: v.n, y: v.y, e: v.e, ci: mode === 'r' ? Stats.oeInterval(v.y, v.e) : null }; });
       const zs = pts_.map(p => mode === 'r' ? (p.y / p.e - 1) / Math.sqrt(1 / p.e) : (p0 > 0 && p0 < 1 ? (p.y / p.n - p0) / Math.sqrt(p0 * (1 - p0) / p.n) : 0));
       const od = Stats.overdispersion(zs), phi = od.inflate ? od.phi : 1;
       pts_ = pts_.map(p => ({ ...p, ...Stats.funnelFlag(p, target, mode, phi) }));
-      const fl = (p) => p.flag === 'alarm' ? (p.side === 'hi' ? 'тревога: выше 99,8%' : 'ниже 99,8% (лучше ожидаемого)') : p.flag === 'alert' ? (p.side === 'hi' ? 'предупреждение: выше 95%' : 'ниже 95% (лучше ожидаемого)') : 'в пределах';
+      const fl = (p) => p.n < QI.MIN_N ? 'мало случаев для сравнения' : p.flag === 'alarm' ? (p.side === 'hi' ? 'тревога: выше 99,8%' : 'ниже 99,8% (лучше ожидаемого)') : p.flag === 'alert' ? (p.side === 'hi' ? 'предупреждение: выше 95%' : 'ниже 95% (лучше ожидаемого)') : 'в пределах';
       h = chartBox('funnel', Chart.funnel(mode === 'r' ? 'Funnel plot: O/E с поправкой на риск' : 'Funnel plot: доля без поправки на риск', pts_, target, { mode, phi }),
           pts_.map(p => ({ g: p.label, n: p.n, y: p.y, e: Math.round(p.e * 10) / 10, r: mode === 'r' ? Math.round(p.y / p.e * 100) / 100 : Math.round(p.y / p.n * 1000) / 10, f: fl(p) })),
           [{ key: 'g', label: 'Группа' }, { key: 'n', label: 'n' }, { key: 'y', label: 'Наблюдаемые (O)' }].concat(mode === 'r' ? [{ key: 'e', label: 'Ожидаемые (E)' }, { key: 'r', label: 'O/E' }] : [{ key: 'r', label: '%' }]).concat([{ key: 'f', label: 'Вывод' }])) +
-        `<div class="card"><table class="tbl"><thead><tr><th>Группа</th><th>n</th><th>O</th>${mode === 'r' ? '<th>E</th><th>O/E</th>' : '<th>%</th>'}<th>Вывод</th></tr></thead><tbody>${pts_.map(p => `<tr><td><b>${esc(p.label)}</b></td><td>${p.n}</td><td>${p.y}</td>${mode === 'r' ? `<td>${QI.n1(p.e)}</td><td>${(Math.round(p.y / p.e * 100) / 100).toLocaleString('ru-RU')}</td>` : `<td>${QI.n1(p.y / p.n * 100)}</td>`}<td class="${p.flag && p.side === 'hi' ? 'bad' : p.flag ? 'good' : ''}">${fl(p)}</td></tr>`).join('')}</tbody></table>
-        <p class="muted">${mode === 'r' ? `С поправкой на риск: для каждой группы O/E, где E это сумма ожидаемых рисков из поля. Границы по распределению Пуассона.${noRisk ? ` Исключено случаев без значения риска: ${noRisk}.` : ''}` : 'Без поправки на риск: доли групп против общей доли регистра. Границы по биномиальному распределению.'} Точные границы с интерполяцией по Spiegelhalter (2005). За 95% (2 SD) предупреждение, за 99,8% (3 SD) тревога, как в руководстве HQIP по выбросам.
+        `<div class="card"><table class="tbl"><thead><tr><th>Группа</th><th>n</th><th>O</th>${mode === 'r' ? '<th>E</th><th>O/E</th>' : '<th>%</th>'}<th>Вывод</th></tr></thead><tbody>${pts_.map(p => `<tr><td><b>${esc(p.label)}</b></td><td>${p.n}</td><td>${p.y}</td>${mode === 'r' ? `<td>${QI.n1(p.e)}</td><td>${(p.y / p.e).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}${p.ci ? '<div class="muted small">95% ДИ ' + p.ci.map(value => value.toLocaleString('ru-RU', { maximumFractionDigits: 2 })).join('–') + '</div>' : ''}</td>` : `<td>${QI.n1(p.y / p.n * 100)}</td>`}<td class="${p.flag && p.side === 'hi' ? 'bad' : p.flag ? 'good' : ''}">${fl(p)}</td></tr>`).join('')}</tbody></table>
+        <p class="muted">${mode === 'r' ? `С поправкой на риск: для каждой группы O/E, где E это сумма ожидаемых рисков из поля. Границы по распределению Пуассона. Оценка Брайера на этой выборке: ${N ? (brier / N).toFixed(3) : 'нет данных'}.${noRisk ? ` Исключено случаев без значения риска: ${noRisk}.` : ''}` : 'Без поправки на риск: доли групп против общей доли регистра. Границы по биномиальному распределению.'} ${noOutcome ? 'Неизвестный исход у ' + noOutcome + ' записей, они не учтены. ' : ''}Точные границы с интерполяцией по Spiegelhalter (2005). За 95% (2 SD) предупреждение, за 99,8% (3 SD) тревога, как в руководстве HQIP по выбросам.
         ${od.test ? (od.inflate ? ` Обнаружена избыточная дисперсия (φ = ${QI.n1(od.phi)}, p = ${Stats.pFmt(od.p)}): границы расширены в √φ раз по мультипликативной модели Spiegelhalter.` : ` Избыточной дисперсии нет (φ = ${QI.n1(od.phi)}, p = ${Stats.pFmt(od.p)}).`) : ' Групп меньше 10: избыточная дисперсия не оценивается.'}${anon ? ' Хирурги показаны под кодами, себя вы видите как «Я».' : ''}</p></div>`;
     }
     if (st.type === 'compare') {
@@ -420,8 +441,32 @@ Routes.proms = async (main, tab = 'due') => {
       if (offs.length > 1 && String(offs[0]) !== o && o !== 'вручную') { const pairs = []; const by = {}; proms.filter(x => x.instrumentName === n && x.doneAt && x.score != null).forEach(x => { (by[x.patientId] = by[x.patientId] || {})[x.offset] = x.score; }); Object.values(by).forEach(b => { if (b[offs[0]] != null && b[o] != null) pairs.push([b[offs[0]], b[o]]); }); const t = pairs.length > 1 ? Stats.wilcoxon(pairs) : null; w = t ? `n пар = ${pairs.length}, z = ${t.z}, p = <b>${Stats.pFmt(t.p)}</b>` : `пар: ${pairs.length}`; }
       return `<tr><td><b>${esc(n)}</b></td><td>${esc(o)}</td><td>${s.n}</td><td>${s.median} [${s.q1}; ${s.q3}]</td><td>${s.mean} ± ${s.sd}</td><td class="small">${w}</td></tr>`; }).join('') || '<tr><td class="muted">Нет заполненных опросников</td></tr>'}</tbody></table></div>` :
     list.length ? `<table class="tbl"><thead><tr><th>Пациент</th><th>Опросник</th><th>Срок</th><th>Результат</th><th></th></tr></thead><tbody>${list.map(x => { const p = patients.find(y => y.id === x.patientId); const ins = insOf(x); return `<tr><td><a href="#patient/${x.patientId}"><b>${esc(p ? pname(p) : '?')}</b></a><div class="muted">${esc(p?.phone || 'нет телефона')}</div></td><td>${esc(x.instrumentName)}${x.offset != null ? ` <span class="muted">· ${x.offset} дн</span>` : ''}</td><td class="${!x.doneAt && x.due < today() ? 'bad' : ''}">${fmtDate(x.due)}</td><td>${x.doneAt ? `<b>${x.score ?? ''}</b> ${esc(x.band || '')}<div class="muted">${fmtDate(x.doneAt)} · ${esc(x.mode || '')}</div>` : ''}</td>
-      <td class="nowrap">${!x.doneAt && ins ? `${p?.phone ? `<a class="btn xs" target="_blank" href="${Proms.waLink(p, ins)}">WhatsApp</a>` : ''}${p?.email ? `<a class="btn xs" href="${Proms.mailLink(p, ins)}">Email</a>` : ''}<button class="btn xs" data-pf="${x.id}">Заполнить</button>` : ''}</td></tr>`; }).join('')}</tbody></table>` : emptyState('Список пуст.')}`;
-  main.onclick = e => { const id = e.target.dataset.pf; if (!id) return; const x = proms.find(y => y.id === id); Proms.fill(x, regs.find(r => r.id === x.registryId)); };
+      <td class="nowrap">${!x.doneAt && ins ? `${p?.phone ? `<a class="btn xs" target="_blank" href="${Proms.waLink(p, ins)}">WhatsApp</a>` : ''}${p?.email ? `<a class="btn xs" href="${Proms.mailLink(p, ins)}">Email</a>` : ''}<button class="btn xs" data-pf="${x.id}">Заполнить</button>${typeof NET !== 'undefined' && NET.on && can('enter') && p?.promsConsent === 'да'
+        ? `<button class="btn xs" data-survey-link="${esc(x.id)}">Одноразовая ссылка</button>` : ''}` : ''}</td></tr>`; }).join('')}</tbody></table>` : emptyState('Список пуст.')}`;
+  main.onclick = async event => {
+    const id = event.target.dataset.pf;
+    if (id) {
+      const entry = proms.find(item => item.id === id);
+      Proms.fill(entry, regs.find(reg => reg.id === entry.registryId));
+    }
+    const surveyId = event.target.dataset.surveyLink;
+    if (!surveyId) return;
+    event.target.disabled = true;
+    try {
+      const { token, expiresAt } = await NET.call('POST', 'survey/issue/' + encodeURIComponent(surveyId), {});
+      const url = new URL('answer.html', location.href);
+      url.hash = token;
+      const m = modal(`<h3>Ссылка на опросник</h3><p>Действительна до ${fmtDate(expiresAt)} или до первого заполнения. Предыдущая ссылка отключена.</p>
+        <input class="inp" id="surveyLink" aria-label="Ссылка на опросник" readonly value="${esc(url.href)}"><div class="row"><button class="btn" id="copySurvey">Скопировать</button></div>`);
+      $('#copySurvey', m).onclick = async () => {
+        const field = $('#surveyLink', m);
+        field.select();
+        try { await navigator.clipboard.writeText(field.value); toast('Ссылка скопирована'); }
+        catch (error) { toast('Скопируйте выделенную ссылку', 'err'); }
+      };
+    } catch (error) { toast(error.message, 'err'); }
+    finally { event.target.disabled = false; }
+  };
 };
 
 /* ---------- ГОДОВОЙ ОТЧЁТ ---------- */
@@ -486,6 +531,8 @@ const IO = {
   b64(u8) { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); },
   unb64(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); },
   async backup() {
+    if (!can('users')) return toast('Резервное копирование доступно администратору', 'err');
+    if (NET.on) return toast('Для данных регистра используйте выгрузку. Для резервной копии SQLite используйте копирование на сервере.', 'err');
     const m = modal(`<h3>Резервная копия</h3><p class="muted">Файл содержит персональные данные пациентов. Рекомендуется зашифровать его паролем (AES-256). Без пароля восстановить зашифрованную копию невозможно.</p>
       <div class="fld"><label class="flab">Пароль шифрования (пусто = без шифрования)</label><input class="inp" type="password" id="bk_p"></div><div class="fld"><label class="flab">Пароль ещё раз</label><input class="inp" type="password" id="bk_p2"></div>
       <div class="row end"><button class="btn primary" id="bk_ok">Скачать</button></div>`);
@@ -500,6 +547,8 @@ const IO = {
     };
   },
   restorePicker() {
+    if (!can('users')) return toast('Восстановление доступно администратору', 'err');
+    if (NET.on) return toast('Восстановление SQLite выполняется на сервере', 'err');
     const i = document.createElement('input'); i.type = 'file'; i.accept = '.json';
     i.onchange = async () => {
       try {
@@ -515,35 +564,60 @@ const IO = {
 };
 
 Routes.io = async (main) => {
+  if (!can('export')) { main.innerHTML = '<div class="head"><h1>Импорт и экспорт</h1></div><p>Доступ ограничен вашей ролью.</p>'; return; }
   const regs = await Data.registries();
-  main.innerHTML = `<div class="head"><h1>Импорт и экспорт</h1></div>
+  main.innerHTML = `<div class="head"><h1>Импорт и экспорт</h1><a class="btn primary" href="#registry-export">Комплект регистра · Excel, CSV и JSON</a></div>
     <div class="cols"><div class="card"><h3>Экспорт данных</h3>${regSelect(regs, '', 'exReg', false)}
       <div class="fld"><label class="flab">Формат</label><select class="inp" id="exFmt"><option value="wide">Широкая таблица: 1 пациент = 1 строка (повторяемые события: последнее)</option><option value="long">Длинная таблица: 1 событие = 1 строка (по типу события)</option></select></div>
       <div class="fld" id="exEtW" style="display:none"><label class="flab">Тип события</label><select class="inp" id="exEt"></select></div>
-      <div class="fld"><label class="flab">Персональные данные</label><select class="inp" id="exPd"><option value="0">без ФИО и телефона (псевдонимизация)</option><option value="1">с ФИО и телефоном</option></select></div>
+      <div class="fld"><label class="flab">Персональные данные</label><select class="inp" id="exPd"><option value="0">без прямых идентификаторов</option>${can('users') ? '<option value="1">с идентификаторами пациентов</option>' : ''}</select></div>
       <div class="row"><button class="btn primary" id="exGo">Скачать CSV</button><button class="btn primary" id="exGoX">Скачать Excel</button></div><p class="muted">CSV открывается в Excel (разделитель «;», UTF-8) и читается в R, SPSS, Stata, Python.</p></div>
-    <div class="card"><h3>Импорт из CSV / Excel</h3><p class="muted">Сохраните таблицу из Excel как CSV. Пациенты сопоставляются по № ИБ: существующим добавляется событие, новые создаются.</p>
+    <div class="card"><h3>Импорт из CSV / Excel</h3><p class="muted">Принимаются CSV и XLSX. Пациенты сопоставляются по № ИБ внутри учреждения: существующим добавляется событие, новые создаются.</p>
       ${regSelect(regs, '', 'imReg', false)}<div class="fld"><label class="flab">Тип события для данных</label><select class="inp" id="imEt"></select></div>
-      <input type="file" id="imFile" accept=".csv,.txt"><div id="imMap"></div></div></div>
-    <div class="card"><h3>Резервная копия всей платформы</h3><div class="row"><button class="btn" onclick="IO.backup()">Скачать (JSON)</button>${can('users') ? '<button class="btn" onclick="IO.restorePicker()">Восстановить</button>' : ''}</div></div>`;
+      <input type="file" id="imFile" accept=".csv,.txt,.xlsx"><div id="imMap"></div></div></div>
+    ${can('users') && !NET.on ? '<div class="card"><h3>Резервная копия браузерной базы</h3><div class="row"><button class="btn" onclick="IO.backup()">Скачать (JSON)</button><button class="btn" onclick="IO.restorePicker()">Восстановить</button></div></div>' : ''}`;
   if (!regs.length) return;
   const fillEt = (sel, regSelId) => { const r = regs.find(x => x.id === $('#' + regSelId).value); $(sel).innerHTML = r.eventTypes.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join(''); };
   fillEt('#exEt', 'exReg'); fillEt('#imEt', 'imReg');
   $('#exReg').onchange = () => fillEt('#exEt', 'exReg'); $('#imReg').onchange = () => fillEt('#imEt', 'imReg');
   $('#exFmt').onchange = e => $('#exEtW').style.display = e.target.value === 'long' ? '' : 'none';
   $('#exGo').onclick = async () => {
-    const ds = await loadReg($('#exReg').value); const reg = ds.reg, pd = $('#exPd').value === '1';
-    const base = [{ key: 'pid', label: 'record_id' }, { key: 'localId', label: 'local_id' }, ...(pd ? [{ key: 'name', label: 'fio' }, { key: 'phone', label: 'phone' }] : []), { key: 'birthDate', label: 'birth_date' }, { key: 'sex', label: 'sex' }, ...(reg.patientFields || []).map(f => ({ key: 'p_' + f.key, label: f.key }))];
-    const pRow = (p) => { const r = { pid: p.id, localId: p.localId, name: pname(p), phone: p.phone, birthDate: p.birthDate, sex: p.sex }; (reg.patientFields || []).forEach(f => r['p_' + f.key] = p.data?.[f.key]); return r; };
-    const flat = (f, v) => f.type === 'complist' ? (v || []).map(c => `${c.name} (CD ${c.grade})`).join('; ') : f.type === 'user' ? valStr(f, v, ds.users) : v;
+    const ds = await loadReg($('#exReg').value); const reg = ds.reg, pd = can('users') && $('#exPd').value === '1';
+    if (pd && !await confirmBox('Включить идентификаторы пациентов для внутренней работы?')) { IO.asX = false; return; }
+    ds.patients = ds.patients.filter(visibleP);
+    const people = new Map(ds.patients.map(p => [p.id, p]));
+    ds.events = ds.events.filter(event => people.has(event.patientId));
+    const ids = new Map(ds.patients.map((p, index) => [p.id, pd ? p.id : 'P' + (index + 1)]));
+    const eventIds = new Map(ds.events.map((e, index) => [e.id, pd ? e.id : 'EV' + (index + 1)]));
+    const byPerson = new Map();
+    for (const event of [...ds.events].sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
+      if (!byPerson.has(event.patientId) && calendarDay(event.date)) byPerson.set(event.patientId, event.date);
+    }
+    const getDate = e => pd ? e.date : (byPerson.has(e.patientId) && calendarDay(e.date) ? daysBetween(byPerson.get(e.patientId), e.date) : '');
+    const fields = list => list.filter(f => pd || RegistryExport.safeField(f) && f.type !== 'group');
+    const base = [{ key: 'pid', label: 'record_id' },
+      ...(pd ? [{ key: 'localId', label: 'local_id' }, { key: 'name', label: 'fio' }, { key: 'phone', label: 'phone' }, { key: 'birthDate', label: 'birth_date' }] : []),
+      { key: 'sex', label: 'sex' }, ...fields(reg.patientFields || []).map(f => ({ key: 'p_' + f.key, label: 'participant_' + f.key }))];
+    const flat = (f, v, personId) => {
+      if (!pd) return RegistryExport.sanitized(f, v, byPerson.get(personId), false);
+      if (f.type === 'complist') return (v || []).map(c => c.name + ' (CD ' + c.grade + ')').join('; ');
+      if (f.type === 'user') return valStr(f, v, ds.users);
+      return v && typeof v === 'object' && !Array.isArray(v) ? JSON.stringify(v) : v;
+    };
+    const pRow = p => {
+      const r = { pid: ids.get(p.id), ...(pd ? { localId: p.localId, name: pname(p), phone: p.phone, birthDate: p.birthDate } : {}), sex: p.sex };
+      fields(reg.patientFields || []).forEach(f => r['p_' + f.key] = flat(f, p.data?.[f.key], p.id));
+      return r;
+    };
     let rows = [], cols = [];
     if ($('#exFmt').value === 'wide') {
-      cols = [...base]; reg.eventTypes.forEach(et => { cols.push({ key: et.id + '__date', label: et.id + '_date' }); formFields(et).forEach(f => cols.push({ key: et.id + '__' + f.key, label: et.id + '_' + f.key })); });
-      rows = ds.patients.map(p => { const r = pRow(p); reg.eventTypes.forEach(et => { const e = ds.events.filter(x => x.patientId === p.id && x.type === et.id).sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0]; if (!e) return; const v = computeValues(reg, p, et, e.data, e.date); r[et.id + '__date'] = e.date; formFields(et).forEach(f => r[et.id + '__' + f.key] = flat(f, v[f.key])); }); return r; });
+      cols = [...base]; reg.eventTypes.forEach(et => { cols.push({ key: et.id + '__date', label: et.id + (pd ? '_date' : '_day') }); fields(formFields(et)).forEach(f => cols.push({ key: et.id + '__' + f.key, label: et.id + '_' + f.key })); });
+      rows = ds.patients.map(p => { const r = pRow(p); reg.eventTypes.forEach(et => { const e = ds.events.filter(x => x.patientId === p.id && x.type === et.id).sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0]; if (!e) return; const v = computeValues(reg, p, et, e.data, e.date); r[et.id + '__date'] = getDate(e); fields(formFields(et)).forEach(f => r[et.id + '__' + f.key] = flat(f, v[f.key], e.patientId)); }); return r; });
     } else {
       const et = etById(reg, $('#exEt').value);
-      cols = [...base, { key: 'event_id', label: 'event_id' }, { key: 'date', label: 'event_date' }, { key: 'status', label: 'status' }, ...formFields(et).map(f => ({ key: f.key, label: f.key }))];
-      rows = ds.events.filter(e => e.type === et.id).map(e => { const p = ds.patients.find(x => x.id === e.patientId); const v = computeValues(reg, p, et, e.data, e.date); const r = { ...pRow(p), event_id: e.id, date: e.date, status: e.status }; formFields(et).forEach(f => r[f.key] = flat(f, v[f.key])); return r; });
+      cols = [...base, { key: 'event_id', label: 'event_id' }, { key: 'date', label: pd ? 'event_date' : 'day_from_first_event' }, { key: 'status', label: 'status' },
+        ...fields(formFields(et)).map(f => ({ key: 'field_' + f.key, label: f.key }))];
+      rows = ds.events.filter(e => e.type === et.id).map(e => { const p = ds.patients.find(x => x.id === e.patientId); const v = computeValues(reg, p, et, e.data, e.date); const r = { ...pRow(p), event_id: eventIds.get(e.id), date: getDate(e), status: e.status }; fields(formFields(et)).forEach(f => r['field_' + f.key] = flat(f, v[f.key], e.patientId)); return r; });
     }
     if (IO.asX) Office.xlsx(`${slug(reg.name)}_${$('#exFmt').value}_${today()}.xlsx`, reg.name, [cols.map(c => c.label), ...rows.map(r => cols.map(c => r[c.key]))]);
     else download(`${slug(reg.name)}_${$('#exFmt').value}_${today()}.csv`, toCSV(rows, cols), 'text/csv');
@@ -551,55 +625,107 @@ Routes.io = async (main) => {
     await Audit.log('экспорт данных' + (pd ? ' (с ПДн)' : ''), 'registries', reg.id, null, null);
   };
   $('#exGoX').onclick = () => { IO.asX = true; $('#exGo').click(); };
+  if (!can('enter')) {
+    $('#imFile').disabled = true;
+    $('#imMap').textContent = 'Для импорта нужна роль с правом ввода';
+    return;
+  }
   $('#imFile').onchange = async (e) => {
-    const rows = parseCSV(await e.target.files[0].text()); if (rows.length < 2) return toast('Пустой файл', 'err');
+    if (!e.target.files[0]) return;
+    let rows;
+    try { rows = await Recon.readTable(e.target.files[0]); }
+    catch (error) { return toast(error.message, 'err'); }
+    if (rows.length < 2) return toast('Пустой файл', 'err');
     const head = rows[0], reg = regs.find(x => x.id === $('#imReg').value), et = etById(reg, $('#imEt').value);
     const targets = [['', '— пропустить —'], ['localId', '№ ИБ (обязательно)'], ['lastName', 'Фамилия'], ['firstName', 'Имя'], ['middleName', 'Отчество'], ['fio', 'ФИО одной строкой'], ['birthDate', 'Дата рождения'], ['sex', 'Пол'], ['phone', 'Телефон'], ['_date', 'Дата события'], ...formFields(et).filter(f => f.type !== 'calc' && f.type !== 'complist').map(f => ['f:' + f.key, f.label])];
-    const guess = (h) => { const x = h.toLowerCase(); const t = targets.find(([k, l]) => k && (l.toLowerCase() === x || k.replace('f:', '') === x)); return t ? t[0] : /ИБ|история|local/i.test(h) ? 'localId' : /фио/i.test(h) ? 'fio' : /рожд/i.test(h) ? 'birthDate' : /пол$/i.test(h) ? 'sex' : ''; };
+    const guess = (h) => { const x = h.toLowerCase(); const t = targets.find(([k, l]) => k && (l.toLowerCase() === x || k.replace('f:', '').toLowerCase() === x)); return t ? t[0] : /ИБ|история|local/i.test(h) ? 'localId' : /фио/i.test(h) ? 'fio' : /рожд/i.test(h) ? 'birthDate' : /пол$/i.test(h) ? 'sex' : ''; };
     $('#imMap').innerHTML = `<h4>Сопоставление столбцов (${rows.length - 1} строк)</h4><table class="tbl small"><tbody>${head.map((h, i) => `<tr><td><b>${esc(h)}</b><div class="muted">${esc(rows[1][i] || '')}</div></td><td><select class="inp" data-col="${i}">${targets.map(([k, l]) => `<option value="${k}" ${guess(h) === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table>
       <div class="grid"><div class="fld"><label class="flab">Если у пациента уже есть такое событие на эту дату</label><select class="inp" id="imMode"><option value="new">создать ещё одно</option><option value="fill" selected>дополнить пустые поля (слияние)</option><option value="over">перезаписать значениями из файла</option></select></div>
       <div class="fld"><label class="flab">Данные пациента в карточке</label><select class="inp" id="imPt"><option value="keep">не трогать существующие</option><option value="fill">дополнить пустые (ФИО, дата рождения, пол, телефон)</option></select></div>
       <div class="fld"><label class="flab">Режим</label><label class="chk"><input type="checkbox" id="imDry"> <span>Только проверить, ничего не сохранять</span></label></div></div>
       <button class="btn primary" id="imGo">Импортировать</button><div id="imRes"></div>`;
     $('#imGo').onclick = async () => {
-      const map = $$('[data-col]').map(s => s.value); if (!map.includes('localId')) return toast('Нужен столбец № ИБ', 'err');
-      const normDate = (s) => { s = String(s || '').trim(); let m; if ((m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})/))) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10); return ''; };
-      const fieldsBy = Object.fromEntries(formFields(et).map(f => [f.key, f]));
-      let created = 0, events = 0, merged = 0, ptUpd = 0; const errs = []; const mode = $('#imMode').value, dry = $('#imDry').checked, ptMode = $('#imPt').value;
-      const allEv = await Data.events(reg.id); const realPut = DB.put.bind(DB); const put = dry ? async (st, o) => ({ ...o, id: o.id || uid('dry') }) : realPut;
-      const existing = await Data.patients(reg.id);
-      for (let r = 1; r < rows.length; r++) {
-        const row = rows[r], g = (k) => { const i = map.indexOf(k); return i < 0 ? '' : (row[i] || '').trim(); };
-        const lid = g('localId'); if (!lid) { errs.push(`строка ${r + 1}: нет № ИБ`); continue; }
-        let p = existing.find(x => x.localId === lid);
-        if (!p) {
-          let [ln, fn, mn] = [g('lastName'), g('firstName'), g('middleName')]; if (!ln && g('fio')) [ln, fn, mn] = g('fio').split(/\s+/);
-          const sx = g('sex').toUpperCase().startsWith('Ж') || /^f/i.test(g('sex')) ? 'Ж' : g('sex') ? 'М' : '';
-          p = await put('patients', { registryId: reg.id, localId: lid, lastName: ln || '', firstName: fn || '', middleName: mn || '', birthDate: normDate(g('birthDate')), sex: sx, phone: g('phone'), data: {}, consent: '' }, 'импорт пациента'); existing.push(p); created++;
+      const map = $$('[data-col]').map(s => s.value);
+      if (!map.includes('localId')) return toast('Нужен столбец № ИБ', 'err');
+      const fieldsBy = new Map(formFields(et).map(f => [f.key, f]));
+      let created = 0, events = 0, merged = 0, ptUpd = 0;
+      const errs = [];
+      const mode = $('#imMode').value, dry = $('#imDry').checked, ptMode = $('#imPt').value;
+      const [allEv, existing] = await Promise.all([Data.events(reg.id), Data.patients(reg.id)]);
+      const center = Auth.user.center || reg.center || '';
+      const put = dry ? async (store, record) => ({ ...record, id: record.id || uid('dry') }) : DB.put.bind(DB);
+      const button = $('#imGo');
+      button.disabled = true;
+      try {
+        for (let r = 1; r < rows.length; r++) {
+          const row = rows[r];
+          const get = key => String(row[map.indexOf(key)] ?? '').trim();
+          const error = msg => errs.push('Строка ' + (r + 1) + ': ' + msg);
+          const lid = get('localId');
+          if (!lid) { error('нет № ИБ'); continue; }
+          const matches = existing.filter(p => p.localId === lid && (p.center || '') === center);
+          if (matches.length > 1) { error('по № ИБ найдено несколько карточек'); continue; }
+          const rawDate = get('_date');
+          const eventData = {};
+          for (const [index, key] of map.entries()) {
+            const field = fieldsBy.get(key.slice(2));
+            if (!key.startsWith('f:') || !field) continue;
+            const value = String(row[index] ?? '').trim();
+            if (value) eventData[field.key] = field.type === 'multiselect' ? value.split(/[;,]/).map(item => item.trim()).filter(Boolean)
+              : field.type === 'date' ? Recon.day(value) || value : value;
+          }
+          const hasEvent = rawDate || Object.keys(eventData).length;
+          const date = Recon.day(rawDate);
+          if (hasEvent && !date) { error('укажите действительную дату события'); continue; }
+          const validated = AI.normalize(formFields(et).filter(f => f.type !== 'user'), [], eventData);
+          if (validated.skipped.length) { validated.skipped.forEach(error); continue; }
+          const data = { ...Object.fromEntries(Object.entries(eventData).filter(([key]) => fieldsBy.get(key)?.type === 'user')), ...validated.out };
+          const birthDate = Recon.day(get('birthDate'));
+          if (get('birthDate') && !birthDate) { error('некорректная дата рождения'); continue; }
+          const rawSex = get('sex');
+          const sex = /^(ж|f|female|женский)$/i.test(rawSex) ? 'Ж' : /^(м|m|male|мужской)$/i.test(rawSex) ? 'М' : '';
+          let [lastName, firstName, middleName] = [get('lastName'), get('firstName'), get('middleName')];
+          if (!lastName && get('fio')) [lastName, firstName, middleName] = get('fio').split(/\s+/);
+          const demographics = { lastName, firstName, middleName, birthDate, sex, phone: get('phone') };
+          let patient = matches[0];
+          const sameType = patient ? allEv.filter(item => item.patientId === patient.id && item.type === et.id) : [];
+          const sameDay = sameType.filter(item => item.date === date);
+          if (hasEvent && mode !== 'new' && sameDay.length > 1) { error('найдено несколько событий на эту дату'); continue; }
+          const same = mode !== 'new' && sameDay[0];
+          if (hasEvent && same?.locked) { error('событие заблокировано'); continue; }
+          if (hasEvent && !same && et.single && sameType.length) { error('у пациента уже есть «' + et.name + '»'); continue; }
+          if (!patient) {
+            patient = await put('patients', { registryId: reg.id, localId: lid, center, ...demographics, data: {}, consent: '' }, 'импорт пациента');
+            existing.push(patient);
+            created++;
+          } else if (ptMode === 'fill') {
+            const updates = Object.fromEntries(Object.entries(demographics).filter(([key, value]) => value && !patient[key]));
+            if (Object.keys(updates).length) {
+              const saved = await put('patients', { ...patient, ...updates }, 'импорт: дополнение карточки');
+              Object.assign(patient, saved);
+              ptUpd++;
+            }
+          }
+          if (!hasEvent) continue;
+          if (same) {
+            const accepted = Object.fromEntries(Object.entries(data).filter(([key]) => mode === 'over' || isEmpty(same.data?.[key])));
+            if (!Object.keys(accepted).length) continue;
+            const values = { ...same.data, ...accepted };
+            const status = validateEvent(et, computeValues(reg, patient, et, values, date)).length ? 'черновик' : 'завершено';
+            const saved = await put('events', { ...same, data: values, status, aiEvidence: AI.matchingEvidence(values, same.aiEvidence) }, 'импорт: слияние');
+            Object.assign(same, saved);
+            merged++;
+          } else {
+            const status = validateEvent(et, computeValues(reg, patient, et, data, date)).length ? 'черновик' : 'завершено';
+            const saved = await put('events', { patientId: patient.id, registryId: reg.id, type: et.id, date, data, status, schemaVersion: reg.version }, 'импорт события');
+            allEv.push(saved);
+            events++;
+          }
         }
-        else if (ptMode === 'fill') { let ch = false; const setIf = (k, v) => { if (v && !p[k]) { p[k] = v; ch = true; } };
-          let [ln, fn, mn] = [g('lastName'), g('firstName'), g('middleName')]; if (!ln && g('fio')) [ln, fn, mn] = g('fio').split(/\s+/);
-          setIf('lastName', ln); setIf('firstName', fn); setIf('middleName', mn); setIf('birthDate', normDate(g('birthDate'))); setIf('phone', g('phone'));
-          if (!p.sex && g('sex')) { p.sex = g('sex').toUpperCase().startsWith('Ж') || /^f/i.test(g('sex')) ? 'Ж' : 'М'; ch = true; }
-          if (ch) { await put('patients', p, 'импорт: дополнение карточки'); ptUpd++; } }
-        const data = {}; map.forEach((k, i) => { if (!k.startsWith('f:')) return; const f = fieldsBy[k.slice(2)]; let v = (row[i] || '').trim(); if (v === '') return;
-          if (f.type === 'number') { const n = FX.num(v); if (n == null) { errs.push(`строка ${r + 1}: «${f.label}» не число (${v})`); return; } v = n; }
-          if (f.type === 'date') { const d = normDate(v); if (!d) { errs.push(`строка ${r + 1}: «${f.label}» не дата (${v})`); return; } v = d; }
-          if (f.type === 'yesno') v = /^(да|1|yes|true|\+)$/i.test(v) ? 'да' : /^(нет|0|no|false|-)$/i.test(v) ? 'нет' : v;
-          if (f.type === 'multiselect') v = v.split(/[;,]/).map(s => s.trim()).filter(Boolean);
-          if (f.type === 'select' && f.options.length && !f.options.includes(v)) errs.push(`строка ${r + 1}: «${f.label}» значение «${v}» нет в списке`);
-          data[f.key] = v; });
-        const evDate = normDate(g('_date')) || today();
-        const same = mode !== 'new' && allEv.find(x => x.patientId === p.id && x.type === et.id && x.date === evDate);
-        if (same && (Object.keys(data).length)) {
-          const nd = { ...(same.data || {}) }; Object.entries(data).forEach(([k, v]) => { if (mode === 'over' || isEmpty(nd[k])) nd[k] = v; });
-          if (same.locked) { errs.push(`строка ${r + 1}: событие пациента ${lid} заблокировано, не изменено`); continue; }
-          await put('events', { ...same, data: nd, status: validateEvent(et, computeValues(reg, p, et, nd, same.date)).length ? 'черновик' : 'завершено' }, 'импорт: слияние'); merged++; continue;
-        }
-        if (Object.keys(data).length || g('_date')) {
-          if (et.single && (await Data.events(reg.id)).some(x => x.patientId === p.id && x.type === et.id)) { errs.push(`строка ${r + 1}: у пациента ${lid} уже есть «${et.name}»`); continue; }
-          await put('events', { patientId: p.id, registryId: reg.id, type: et.id, date: normDate(g('_date')) || today(), data, status: validateEvent(et, computeValues(reg, p, et, data, g('_date'))).length ? 'черновик' : 'завершено', schemaVersion: reg.version }, 'импорт события'); events++;
-        }
+      } catch (error) {
+        errs.push('Импорт остановлен: ' + error.message);
+      } finally {
+        button.disabled = false;
       }
       $('#imRes').innerHTML = `<p><b>${dry ? 'Проверка (ничего не сохранено)' : 'Готово'}:</b> новых пациентов ${created}, новых событий ${events}, слито с существующими ${merged}, дополнено карточек ${ptUpd}.</p>${errs.length ? `<details open><summary class="bad">Замечания: ${errs.length}</summary><div class="small">${errs.slice(0, 200).map(esc).join('<br>')}</div></details>` : ''}`;
     };

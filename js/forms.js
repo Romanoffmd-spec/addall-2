@@ -2,7 +2,7 @@
 'use strict';
 
 const FIELD_TYPES = {
-  text: 'Текст', textarea: 'Длинный текст', number: 'Число', date: 'Дата', select: 'Выбор (один)',
+  text: 'Текст', textarea: 'Длинный текст', number: 'Число', date: 'Дата', time: 'Время', datetime: 'Дата и местное время', select: 'Выбор (один)',
   multiselect: 'Выбор (несколько)', yesno: 'Да / Нет', calc: 'Расчётное поле', complist: 'Осложнения (Clavien-Dindo + CCI)',
   user: 'Сотрудник (хирург, врач)', icd10: 'Диагноз по МКБ-10', icdo: 'Морфология по МКБ-О', patient: 'Пациент (ссылка на карточку)',
   group: 'Вложенные записи (повторяющаяся группа)'
@@ -38,7 +38,7 @@ function grpHTML(f, list, users) {
     <button class="btn sm" type="button" data-gadd>+ ${esc(f.itemLabel || 'Добавить')}</button>`;
 }
 /* разбор описания вложенных полей: «Подпись | тип | варианты через ;», вложенность отступом */
-const TYPE_ALIAS = { текст: 'text', число: 'number', дата: 'date', выбор: 'select', несколько: 'multiselect', 'да/нет': 'yesno', группа: 'group', сотрудник: 'user', 'длинный текст': 'textarea' };
+const TYPE_ALIAS = { текст: 'text', число: 'number', дата: 'date', время: 'time', 'дата и время': 'datetime', выбор: 'select', несколько: 'multiselect', 'да/нет': 'yesno', группа: 'group', сотрудник: 'user', 'длинный текст': 'textarea' };
 function parseSubfields(txt) {
   const root = { subfields: [] }; const stack = [{ ind: -1, node: root }]; const used = new Set();
   String(txt || '').split('\n').forEach(line => {
@@ -173,6 +173,14 @@ function computeValues(reg, patient, et, data, eventDate) {
   return vals;
 }
 
+function validNumericStep(field, value) {
+  if (!Number.isFinite(value)) return false;
+  const step = Number(field.step);
+  if (!(step > 0)) return true;
+  const units = (value - (Number(field.min) || 0)) / step;
+  return Math.abs(units - Math.round(units)) < 1e-7;
+}
+
 function validateEvent(et, vals) {
   const errs = [];
   formFields(et).forEach(f => {
@@ -180,9 +188,15 @@ function validateEvent(et, vals) {
     const v = vals[f.key];
     if (f.required && isEmpty(v) && f.type !== 'calc') errs.push(`«${f.label}»: обязательно`);
     if (f.type === 'number' && !isEmpty(v)) {
+      if (!validNumericStep(f, Number(v))) errs.push('«' + f.label + '»: проверьте число и шаг');
       if (f.min !== '' && f.min != null && Number(v) < Number(f.min)) errs.push(`«${f.label}»: меньше ${f.min}`);
       if (f.max !== '' && f.max != null && Number(v) > Number(f.max)) errs.push(`«${f.label}»: больше ${f.max}`);
     }
+    if (f.type === 'time' && !isEmpty(v) && !clinicalTime(v)) errs.push('«' + f.label + '»: некорректное время');
+    if (f.type === 'datetime' && !isEmpty(v) && !clinicalDateTime(v)) errs.push('«' + f.label + '»: некорректная дата или время');
+    if (f.type === 'select' && !isEmpty(v) && !(f.options || []).includes(v)) errs.push('«' + f.label + '»: выберите допустимый вариант');
+    if (f.type === 'multiselect' && !isEmpty(v) && (!Array.isArray(v) || v.some(item => !(f.options || []).includes(item)))) errs.push('«' + f.label + '»: есть вариант вне списка');
+    if (f.type === 'date' && !isEmpty(v) && !calendarDay(v)) errs.push('«' + f.label + '»: некорректная дата');
     if (f.type === 'date' && !isEmpty(v) && v > addDays(today(), 1)) errs.push(`«${f.label}»: дата в будущем`);
   });
   return errs;
@@ -203,6 +217,7 @@ function completeness(et, vals) {
 function showVal(f, v, users) {
   if (isEmpty(v)) return '<span class="muted">не указано</span>';
   if (f.type === 'date') return fmtDate(v);
+  if (f.type === 'datetime') return clinicalDateTime(v) ? fmtDate(v.slice(0, 10)) + ' ' + esc(v.slice(11)) : esc(v);
   if (f.type === 'yesno') return v === 'да' ? 'Да' : v === 'нет' ? 'Нет' : esc(v);
   if (f.type === 'multiselect') return esc([].concat(v).join(', '));
   if (f.type === 'complist') return v.length ? v.map(c => `${esc(c.name)} <span class="tag">CD ${esc(c.grade)}</span>`).join('<br>') + `<div class="muted">CCI ${FX.cci(v)}</div>` : 'нет';
@@ -221,8 +236,10 @@ function fieldInput(f, v, users) {
   let inp = '';
   switch (f.type) {
     case 'textarea': inp = `<textarea class="inp" id="${id}" data-k="${f.key}" rows="3">${esc(v || '')}</textarea>`; break;
-    case 'number': inp = `<input class="inp" type="number" step="any" id="${id}" data-k="${f.key}" value="${esc(v ?? '')}" ${f.min !== '' && f.min != null ? `min="${f.min}"` : ''} ${f.max !== '' && f.max != null ? `max="${f.max}"` : ''}>`; break;
+    case 'number': inp = `<input class="inp" type="number" step="${Number(f.step) > 0 ? esc(f.step) : 'any'}" id="${id}" data-k="${f.key}" value="${esc(v ?? '')}" ${f.min !== '' && f.min != null ? `min="${f.min}"` : ''} ${f.max !== '' && f.max != null ? `max="${f.max}"` : ''}>`; break;
     case 'date': inp = `<input class="inp" type="date" id="${id}" data-k="${f.key}" value="${esc(v || '')}">`; break;
+    case 'time':
+    case 'datetime': inp = `<input class="inp" step="1" type="${f.type === 'datetime' ? 'datetime-local' : 'time'}" id="${id}" data-k="${f.key}" value="${esc(v || '')}">`; break;
     case 'select': if ((f.search || opts.length > 20) && !f.diagram) { const u = optUse(f.key); const so = [...opts].sort((a, b) => (u[b] || 0) - (u[a] || 0)); inp = `<input class="inp srch" id="${id}" data-k="${f.key}" data-opts="1" list="dl_${f.key}" value="${esc(v ?? '')}" placeholder="Начните вводить: поиск по ${opts.length} вариантам" autocomplete="off"><datalist id="dl_${f.key}">${so.map(o => `<option value="${esc(o)}">${u[o] ? '★ часто' : ''}</option>`).join('')}</datalist>`; break; }
       inp = `<select class="inp" id="${id}" data-k="${f.key}"><option value=""></option>${opts.map(o => `<option ${String(v) === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>${f.diagram ? diagramSVG(f, v) : ''}`; break;
     case 'multiselect': inp = `<div class="chips" id="${id}" data-k="${f.key}" data-multi="1">${opts.map(o => `<label class="chip"><input type="checkbox" value="${esc(o)}" ${[].concat(v || []).includes(o) ? 'checked' : ''}>${esc(o)}</label>`).join('')}</div>${f.diagram ? diagramSVG(f, v) : ''}`; break;
@@ -682,30 +699,33 @@ function scoreInstrument(ins, answers) {
 }
 
 /* оценка показателя качества */
-function evalIndicator(ind, events, patients, reg) {
+function evalIndicator(ind, events, patients, reg, options = {}) {
+  if (['change', 'rate', 'time'].includes(ind.kind)) return RegistryMeasure.evaluate(ind, events, patients, reg, options);
   const et = reg.eventTypes.find(e => e.id === ind.et);
-  let den = 0, num = 0, naN = 0, noForm = 0; const denIds = [], numIds = [], missIds = [], reasonIds = [];
+  let den = 0, num = 0, naN = 0, noForm = 0; const denIds = [], numIds = [], missIds = [], reasonIds = [], naIds = [], diedIds = [];
   const patientById = new Map(patients.filter(p => !p.registryId || p.registryId === reg.id).map(p => [p.id, p]));
   const markMissing = e => { missIds.push(e.id); };
+  const unavailable = (condition, values) => condition?.key && !['empty', 'filled'].includes(condition.op)
+    && (isEmpty(values[condition.key]) || (values[condition.key] === 'неизвестно' && condition.value !== 'неизвестно'));
   /* оценка одной записи: в знаменатель, в числитель, пропуск или «не применимо» */
   const judge = e => {
     const p = patientById.get(e.patientId);
     if (!p) return;
     const v = computeValues(reg, p, et, e.data, e.date);
     if (ind.denom?.key) {
-      if (isEmpty(v[ind.denom.key]) && !['empty', 'filled'].includes(ind.denom.op)) {
-        if (v._na?.[ind.denom.key] === 'na') naN++;
+      if (unavailable(ind.denom, v)) {
+        if (v._na?.[ind.denom.key] === 'na') { naN++; naIds.push(e.id); }
         else markMissing(e);
         return;
       }
       if (!condOK(ind.denom, v)) return;
     }
     if (e.status === 'черновик') { markMissing(e); return; }
-    if (ind.num.key && isEmpty(v[ind.num.key]) && !['empty', 'filled'].includes(ind.num.op)) {
+    if (unavailable(ind.num, v)) {
       /* 2.11: поле скрыто условием (например, степень ISREC при отсутствии несостоятельности): случай считается без события */
       const nf = formFields(et || {}).find(f => f.key === ind.num.key);
       const na = nf && nf.showIf && nf.showIf.key && !isEmpty(v[nf.showIf.key]) && !condOK(nf.showIf, v);
-      if (v._na && v._na[ind.num.key] === 'na') { naN++; return; } /* 2.11: отмечено "не применимо": случай вне знаменателя */
+      if (v._na && v._na[ind.num.key] === 'na') { naN++; naIds.push(e.id); return; } /* 2.11: отмечено "не применимо": случай вне знаменателя */
       if (!na) { markMissing(e); return; }
     }
     den++; denIds.push(e.id); if (condOK(ind.num, v)) { num++; numIds.push(e.id); }
@@ -716,21 +736,21 @@ function evalIndicator(ind, events, patients, reg) {
        Выполненный срок оценивается по своей записи; просроченный срок без записи это пропуск («исход неизвестен»);
        срок с причиной это тоже неизвестный исход, но с объяснением; «не применимо» исключается; срок, который не наступил, не считается. */
     const regEvents = events.filter(e => !e.registryId || e.registryId === reg.id);
-    const items = FollowQ.build(reg, regEvents, patients, FollowQ.cache || []);
+    const items = FollowQ.build(reg, regEvents, patients, options.tasks || FollowQ.cache || [], options).filter(x => x.et.id === ind.et);
     const stand = x => x.event || (x.ep.patient ? regEvents.find(e => e.id === x.ep.anchorEventId) || regEvents.find(e => e.patientId === x.ep.patientId && e.date === x.ep.date) : x.ep);
     for (const x of items) {
       if (!patientById.has(x.ep.patientId)) continue;
       if (x.state === 'done') judge(x.event);
-      else if (x.state === 'na') naN++;
+      else if (x.state === 'na') { naN++; naIds.push(stand(x)?.id || x.ep.id); }
       else if (x.state === 'reason') { const e = stand(x); if (e) reasonIds.push(e.id); }
-      else if (x.state === 'overdue' || x.state === 'partial') { const e = stand(x); if (e) { markMissing(e); if (!x.event) noForm++; } }
+      else if (x.state === 'overdue' || x.state === 'partial' || x.state === 'died') { const e = stand(x); if (e) { markMissing(e); if (!x.event) noForm++; if (x.state === 'died') diedIds.push(e.id); } }
     }
   } else {
     events.filter(e => e.type === ind.et && (!e.registryId || e.registryId === reg.id)).forEach(judge);
   }
   const miss = missIds.length + reasonIds.length;
-  const r = { den, num, miss, na: naN, noForm, reason: reasonIds.length, pct: den ? Math.round(num / den * 1000) / 10 : null };
+  const r = { den, num, miss, na: naN, noForm, reason: reasonIds.length, died: diedIds.length, pct: den ? Math.round(num / den * 1000) / 10 : null };
   /* списки событий для перехода к пациентам; неперечисляемые, чтобы не попадать в контекст ИИ */
-  Object.defineProperties(r, { denIds: { value: denIds }, numIds: { value: numIds }, missIds: { value: missIds }, reasonIds: { value: reasonIds } });
+  Object.defineProperties(r, { denIds: { value: denIds }, numIds: { value: numIds }, missIds: { value: missIds }, reasonIds: { value: reasonIds }, naIds: { value: naIds }, diedIds: { value: diedIds } });
   return r;
 }

@@ -48,7 +48,7 @@ const pname = (p) => [p.lastName, p.firstName, p.middleName].filter(Boolean).joi
 const etById = (reg, id) => reg.eventTypes.find(e => e.id === id);
 const centers = () => Settings.data.centers || [];
 /* видимость пациентов: при режиме «свой центр» обычные роли видят только пациентов своего центра */
-const visibleP = (p) => Settings.data.centerScope !== 'own' || ['admin', 'lead'].includes(Auth.user.role) || !Auth.user.center || p.center === Auth.user.center;
+const visibleP = (p) => Settings.data.centerScope !== 'own' || ['admin', 'lead'].includes(Auth.user.role) || !Auth.user.center || p.center === Auth.user.center || p.followupCenter === Auth.user.center;
 function centerSelect(cur, id) { return centers().length ? `<select class="inp" id="${id}"><option value=""></option>${centers().map(c => `<option ${c === cur ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>` : `<input class="inp" id="${id}" value="${esc(cur || '')}" placeholder="список центров задаётся в настройках">`; }
 function regSelect(regs, cur, id = 'regSel', all = true) {
   return `<select class="inp" id="${id}">${all ? '<option value="">Все регистры</option>' : ''}${regs.map(r => `<option value="${r.id}" ${r.id === cur ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select>`;
@@ -171,16 +171,53 @@ function newRegDialog() {
 }
 
 /* ---------- КОНСТРУКТОР РЕГИСТРА ---------- */
-Routes.registry = async (main, id, tab = 'general') => {
-  const reg = await DB.get('registries', id); if (!reg) return go('registries');
-  const ro = !can('design') || (typeof NET !== 'undefined' && NET.on && !regManage(reg));
-  const tabs = { general: 'Общее', events: 'Формы событий', patient: 'Поля пациента', lists: 'Списки (реестры)', indicators: 'Показатели качества', proms: 'Опросники и расписание' };
-  main.innerHTML = `<div class="head"><h1>${esc(reg.name)}</h1><div class="row"><a class="btn" href="#patients/${reg.id}">Пациенты</a>${TRAIN ? `<a class="btn" href="#training/${encodeURIComponent(reg.id)}">Учебные пациенты</a>` : ''}${ro ? '' : '<button class="btn primary" id="rgSave">Сохранить</button>'}</div></div>
-    <div class="tabs">${Object.entries(tabs).map(([k, t]) => `<a href="#registry/${reg.id}/${k}" class="${k === tab ? 'on' : ''}">${t}</a>`).join('')}</div><div id="rgBody"></div>`;
+Routes.registry = async (main, id, tab = 'general', mode = '') => {
+  const original = await DB.get('registries', id); if (!original) return go('registries');
+  const draft = mode === 'draft';
+  const reg = draft && original.schemaDraft ? { ...original, ...clone(original.schemaDraft) } : clone(original);
+  const mayDesign = can('design') && (!(typeof NET !== 'undefined' && NET.on) || regManage(reg));
+  const ro = !mayDesign || !!original.archivedAt || (!draft && (!!original.schemaEffectiveOn || original.status === 'активный'));
+  const tabs = { general: 'Общее', events: 'Формы событий', patient: 'Поля пациента', lists: 'Списки (реестры)', indicators: 'Показатели качества', checks: 'Межформенные проверки', proms: 'Опросники и расписание' };
+  main.innerHTML = `<div class="head"><h1>${esc(reg.name)}</h1><div class="row"><a class="btn" href="#patients/${reg.id}">Пациенты</a>${TRAIN ? `<a class="btn" href="#training/${encodeURIComponent(reg.id)}">Учебные пациенты</a>` : ''}${mayDesign && !draft ? `<a class="btn" href="#registry/${reg.id}/${tab}/draft">${reg.schemaDraft ? 'Открыть черновик схемы' : 'Новый черновик схемы'}</a>` : ''}
+    ${ro ? '' : `<button class="btn primary" id="rgSave">${draft ? 'Сохранить черновик' : 'Сохранить'}</button>`}
+    ${mayDesign && draft ? '<button class="btn" id="rgPublish">Опубликовать схему</button>' : ''}</div></div>
+    ${draft ? '<p class="warnt">Черновик схемы. Сотрудники продолжают работать по опубликованной версии.</p>' : ''}
+    <div class="tabs">${Object.entries(tabs).map(([k, t]) => `<a href="#registry/${reg.id}/${k}${draft ? '/draft' : ''}" class="${k === tab ? 'on' : ''}">${t}</a>`).join('')}</div><div id="rgBody"></div>`;
   const body = $('#rgBody');
   let dirty = false; const mark = () => { dirty = true; const b = $('#rgSave'); if (b) b.classList.add('pulse'); };
-  const save = async () => { reg.version = (reg.version || 1) + (dirty ? 1 : 0); await DB.put('registries', reg, 'изменение структуры регистра'); dirty = false; toast('Сохранено, версия ' + reg.version); App.route(); };
+  const validRules = () => !(reg.crossChecks || []).some(rule => rule.form === rule.related || !etById(reg, rule.form) || !etById(reg, rule.related));
+  const save = async () => {
+    if (!validRules()) return toast('Проверьте формы в межформенных правилах', 'err');
+    const schema = RegistrySchema.snapshot(reg);
+    try {
+      if (draft) {
+        const schemaDraft = { ...schema, name: reg.name, description: reg.description, lists: reg.lists,
+          status: reg.status, followupEvery: reg.followupEvery };
+        await DB.put('registries', { ...original, schemaDraft }, 'сохранение черновика схемы');
+      } else {
+        const next = dirty ? RegistrySchema.publish(reg, original, today()) : reg;
+        // Pilot registries can still be edited directly. An explicit publication locks this path.
+        if (!original.schemaEffectiveOn && reg.status !== 'активный') delete next.schemaEffectiveOn;
+        await DB.put('registries', next, 'изменение структуры регистра');
+      }
+      dirty = false;
+      toast(draft ? 'Черновик сохранён' : 'Структура сохранена');
+      App.route();
+    } catch (error) { toast(error.message, 'err'); }
+  };
   if ($('#rgSave')) $('#rgSave').onclick = save;
+  if ($('#rgPublish')) $('#rgPublish').onclick = async () => {
+    if (!validRules()) return toast('Проверьте формы в межформенных правилах', 'err');
+    const effective = await promptBox('Дата начала действия новой версии (ГГГГ-ММ-ДД). Схема вступит в силу при публикации.', today());
+    if (!effective) return;
+    if (!calendarDay(effective) || effective > today()) return toast('Укажите дату не позднее сегодняшней', 'err');
+    if (!(await confirmBox('Опубликовать эту схему для всех пользователей регистра?'))) return;
+    try {
+      await DB.put('registries', RegistrySchema.publish(reg, original, effective), 'публикация версии схемы');
+      go('registry/' + reg.id + '/' + tab);
+    } catch (error) { toast(error.message, 'err'); }
+  };
+  if (tab === 'checks') ClinicalRules.edit(reg, body, ro, mark);
 
   if (tab === 'general') {
     body.innerHTML = `<div class="card"><div class="grid">
@@ -191,17 +228,26 @@ Routes.registry = async (main, id, tab = 'general') => {
       <div class="fld wide"><label class="flab">Единица учёта: эпизод открывается событием</label><select class="inp" id="g_ep" ${ro ? 'disabled' : ''}>${reg.eventTypes.map(e => `<option value="${e.id}" ${Episodes.opener(reg) === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}<option value="${Episodes.PATIENT}" ${Episodes.isPatient(reg) ? 'selected' : ''}>Пациент: длительное наблюдение (без отдельных эпизодов)</option></select>
         <div id="g_anchorBox" ${Episodes.isPatient(reg) ? '' : 'hidden'} style="margin-top:8px"><label class="flab" for="g_anchor">Сроки наблюдения считать от формы</label><select class="inp" id="g_anchor" ${ro ? 'disabled' : ''}><option value="">первой записи пациента</option>${reg.eventTypes.map(e => `<option value="${e.id}" ${reg.episode?.anchorForm === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select><span class="fhint">Лучше выбрать форму включения: тогда ввод старого визита задним числом не сдвинет все сроки. Если у пациента такой формы ещё нет, отсчёт идёт от первой записи.</span></div><span class="fhint">Что регистр считает одним случаем. Хирургический аудит: операция. Регистр заболевания: диагноз. Кардиология: госпитализация. Регистр длительного наблюдения (например, диабет): один пациент это один случай, сроки считаются от первой записи. Остальные события пациента относятся к эпизоду по дате или по выбору в форме. Охват, полнота наблюдения и показатели качества считаются по эпизодам.</span></div>
       <div class="fld"><label class="flab">Событие-точка отсчёта для выживаемости</label><select class="inp" id="g_start" ${ro ? 'disabled' : ''}>${reg.eventTypes.map(e => `<option value="${e.id}" ${reg.keyDates?.start === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>
-      <div class="fld"><label class="flab">Версия схемы</label><div class="calc">v${reg.version}</div></div>
+      <div class="fld"><label class="flab">Версия схемы</label><div class="calc">v${reg.version}${reg.schemaEffectiveOn ? ' · с ' + fmtDate(reg.schemaEffectiveOn) : ''}</div></div>
+      ${reg.schemaHistory?.length ? `<div class="fld wide"><label class="flab">Предыдущие версии</label><select class="inp" id="g_history"><option value="">Скачать версию схемы</option>${reg.schemaHistory.map(schema => `<option value="${schema.version}">v${schema.version}${schema.effectiveOn ? ' · с ' + fmtDate(schema.effectiveOn) : ''}</option>`).join('')}</select></div>` : ''}
     </div></div>
-    ${ro ? '' : `<div class="card"><h3>Действия</h3><div class="row"><button class="btn" id="g_export">Экспорт структуры (JSON)</button><button class="btn" id="g_dup">Дублировать регистр</button><button class="btn danger" id="g_del">Удалить регистр</button></div><p class="muted">Экспорт структуры позволяет перенести регистр в другую установку AddAll без данных пациентов.</p></div>`}`;
+    ${can('export') || !ro ? `<div class="card"><h3>Действия</h3><div class="row">
+      <button class="btn" id="g_export">Экспорт структуры (JSON)</button>
+      ${ro ? '' : '<button class="btn" id="g_dup">Дублировать регистр</button><button class="btn danger" id="g_del">Удалить регистр</button>'}
+      </div><p class="muted">Файл структуры можно перенести в другую установку AddAll.</p></div>` : ''}`;
     const upd = () => { reg.name = $('#g_name').value; reg.description = $('#g_desc').value; reg.status = $('#g_status').value; reg.followupEvery = Number($('#g_fu').value || 0); reg.keyDates = { ...(reg.keyDates || {}), start: $('#g_start').value }; reg.episode = { ...(reg.episode || {}), opener: $('#g_ep').value, anchorForm: $('#g_anchor').value }; if (!reg.episode.anchorForm) delete reg.episode.anchorForm; $('#g_anchorBox').hidden = reg.episode.opener !== Episodes.PATIENT; mark(); };
     $$('input,textarea,select', body).forEach(x => x.onchange = upd);
+    if ($('#g_history', body)) $('#g_history', body).onchange = event => {
+      const version = reg.schemaHistory?.find(schema => String(schema.version) === event.target.value);
+      if (version) download(slug(reg.name) + '_schema_v' + version.version + '.json', JSON.stringify(version, null, 2), 'application/json');
+    };
+    if ($('#g_export')) $('#g_export').onclick = () => download(slug(reg.name) + '_schema.json', JSON.stringify(SchemaTransfer.export(reg), null, 2), 'application/json');
     if (!ro) {
-      $('#g_export').onclick = () => { const c = clone(reg); ['id', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'].forEach(k => delete c[k]); download(slug(reg.name) + '_schema.json', JSON.stringify(c, null, 2), 'application/json'); };
       $('#g_dup').onclick = async () => { const c = clone(reg); delete c.id; c.name += ' (копия)'; c.version = 1; const s = await DB.put('registries', c, 'дублирование регистра'); go('registry/' + s.id); };
       $('#g_del').onclick = async () => {
         const pts = await Data.patients(reg.id);
         if (pts.length) return toast(`В регистре ${pts.length} пациентов. Сначала удалите или перенесите их.`, 'err');
+        if (typeof NET !== 'undefined' && NET.on) return go('admin-center/registries/' + reg.id);
         if (await confirmBox('Удалить регистр «' + reg.name + '»?')) { await DB.del('registries', reg.id); go('registries'); }
       };
     }
@@ -267,7 +313,7 @@ Routes.registry = async (main, id, tab = 'general') => {
 
   if (tab === 'indicators') {
     const draw = () => {
-      body.innerHTML = `<div class="card"><p class="muted">Показатель качества = доля событий, где выполнено условие числителя, среди событий, где выполнено условие знаменателя. Считается на главной, в аналитике и в годовом отчёте.</p>
+      body.innerHTML = `<div class="card"><p class="muted">Настройте долю, изменение повторного измерения, частоту на дни наблюдения или время до события. Один расчёт используется на главной, в аналитике и в отчётном периоде.</p>
         <table class="tbl"><thead><tr><th>Показатель</th><th>Событие</th><th>Знаменатель</th><th>Числитель</th><th>Цель</th><th></th></tr></thead><tbody>${(reg.indicators || []).map((i, k) => `<tr><td><b>${esc(i.name)}</b></td><td>${esc(etById(reg, i.et)?.name || '?')}</td><td class="muted">${i.denom?.key ? `${esc(i.denom.key)} ${OPS[i.denom.op]} ${esc(i.denom.value || '')}` : 'все'}</td><td>${esc(i.num.key)} ${OPS[i.num.op]} ${esc(i.num.value || '')}</td><td>${i.target !== '' && i.target != null ? (i.lowerBetter ? '≤' : '≥') + i.target + '%' : ''}</td>${ro ? '<td></td>' : `<td class="nowrap"><button class="btn xs" data-ie="${k}">✎</button><button class="btn xs danger" data-ix="${k}">×</button></td>`}</tr>`).join('') || '<tr><td colspan="6" class="muted">Нет показателей</td></tr>'}</tbody></table>
         ${ro ? '' : '<button class="btn sm" id="indAdd">+ Показатель</button>'}</div>`;
       if (ro) return;
@@ -312,9 +358,17 @@ function fieldDialog(reg, et, field, done, patientLevel) {
     <div class="fld"><label class="flab">Тип</label><select class="inp" id="f_t">${Object.entries(FIELD_TYPES).filter(([k]) => !patientLevel || !['calc', 'complist'].includes(k)).map(([k, v]) => `<option value="${k}" ${f.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
     <div class="fld"><label class="flab">Единица измерения</label><input class="inp" id="f_u" value="${esc(f.unit || '')}"></div>
     <div class="fld wide" data-show="select,multiselect,complist"><label class="flab">Варианты (по одному в строке)</label><textarea class="inp" id="f_o" rows="5">${esc((f.options || []).join('\n'))}</textarea></div>
+    <div class="fld wide" data-show="select,multiselect"><label class="flab" for="f_codes">Коды вариантов для выгрузки</label>
+      <textarea class="inp" id="f_codes" rows="3" placeholder="1 | Первый вариант">${esc(Object.entries(f.optionCodes || {}).map(([label, code]) => code + ' | ' + label).join('\n'))}</textarea>
+      <p class="fhint">Одна строка на вариант: код, знак | и подпись из списка выше.</p></div>
     <div class="fld" data-show="number"><label class="flab">Минимум</label><input class="inp" type="number" id="f_min" value="${esc(f.min ?? '')}"></div>
     <div class="fld" data-show="number"><label class="flab">Максимум</label><input class="inp" type="number" id="f_max" value="${esc(f.max ?? '')}"></div>
-    <div class="fld wide" data-show="calc"><label class="flab">Формула</label><input class="inp mono" id="f_f" value="${esc(f.formula || '')}" placeholder="bmi(height, weight)">
+    <div class="fld" data-show="number"><label class="flab" for="f_step">Шаг числа, 1 для целых</label><input class="inp" type="number" min="0" step="any" id="f_step" value="${esc(f.step ?? '')}"></div>
+    <div class="fld"><label class="flab" for="f_standard">Справочник или стандарт</label><input class="inp" id="f_standard" value="${esc(f.standard || '')}" placeholder="Например, LOINC"></div>
+    <div class="fld"><label class="flab" for="f_standardCode">Код поля в справочнике</label><input class="inp" id="f_standardCode" value="${esc(f.standardCode || '')}"></div>
+    <label class="chk"><input type="checkbox" id="f_sensitive" ${f.sensitive ? 'checked' : ''}> Исключать из выгрузок без идентификаторов</label>
+    <div class="fld wide" data-show="calc"><label class="flab">Формула</label><input class="inp mono" id="f_f" value="${esc(f.formula || f.formulaDraft || '')}" placeholder="bmi(height, weight)">
+      ${f.formulaDraft ? '<div class="warnt">Импортированная формула. Проверьте её перед сохранением.</div>' : ''}
       <div class="help">Переменные: коды полей этой формы и карточки пациента, eventDate, birthDate. Функции: age(дата, на_дату), days(с, по), bmi(рост, вес), round(x, n), cci(список), maxcd(список), ifelse(условие, a, b), logit(x) для модели риска, Math.*. Модель риска: <span class="mono">logit(-5.2 + 0.04*age_dx + ifelse(asa == 'III', 0.9, 0))</span>. Пример: <span class="mono">ifelse(ln_total >= 12, 'да', 'нет')</span></div></div>
     <div class="fld"><label class="flab">Обязательное</label><select class="inp" id="f_r"><option value="0">нет</option><option value="1" ${f.required ? 'selected' : ''}>да</option></select></div>
     <div class="fld"><label class="flab">Желательное (оранжевое, считается в полноте)</label><select class="inp" id="f_key"><option value="0">нет</option><option value="1" ${f.key_ ? 'selected' : ''}>да</option></select></div>
@@ -337,10 +391,28 @@ function fieldDialog(reg, et, field, done, patientLevel) {
     let key = field ? f.key : ($('#f_k', m).value.trim() || slug(label));
     if (!field) { key = key.replace(/[^\wЀ-ӿ]/g, '_'); if (/^\d/.test(key)) key = 'f_' + key; let k2 = key, n = 2; while (allKeys.includes(k2)) k2 = key + '_' + n++; key = k2; }
     const out = { ...f, key, label, type: $('#f_t', m).value, unit: $('#f_u', m).value.trim(), options: $('#f_o', m).value.split('\n').map(s => s.trim()).filter(Boolean),
-      min: $('#f_min', m).value, max: $('#f_max', m).value, formula: $('#f_f', m).value.trim(), required: $('#f_r', m).value === '1', key_: $('#f_key', m).value === '1',
+      min: $('#f_min', m).value, max: $('#f_max', m).value, step: $('#f_step', m).value, standard: $('#f_standard', m).value.trim(),
+      standardCode: $('#f_standardCode', m).value.trim(), sensitive: $('#f_sensitive', m).checked, formula: $('#f_f', m).value.trim(), required: $('#f_r', m).value === '1', key_: $('#f_key', m).value === '1',
       def: $('#f_d', m).value.trim(), help: $('#f_h', m).value.trim(), warn: $('#f_w', m).value.trim() };
+    if (out.type === 'number' && ((out.step !== '' && !(Number(out.step) > 0))
+      || (out.min !== '' && out.max !== '' && Number(out.min) > Number(out.max)))) return toast('Проверьте диапазон и шаг числа', 'err');
+    delete out.formulaDraft;
+    if (out.type !== 'number') delete out.step;
     out.carry = $('#f_cf', m).value === '1'; out.search = out.type === 'select' && $('#f_sr', m).value === '1'; out.diagram = ['select', 'multiselect'].includes(out.type) ? $('#f_dg', m).value : '';
     if (out.diagram) { const D = DIAGRAMS[out.diagram]; const extra = out.options.filter(o => !D.r.some(r => r[0] === o)); out.options = [...D.r.map(r => r[0]), ...extra]; }
+    delete out.optionCodes;
+    if (['select', 'multiselect'].includes(out.type)) {
+      const rows = $('#f_codes', m).value.split('\n').map(line => line.trim()).filter(Boolean)
+        .map(line => { const separator = line.indexOf('|'); return separator > 0 ? [line.slice(0, separator).trim(), line.slice(separator + 1).trim()] : ['', '']; });
+      const labels = new Set(), codes = new Set();
+      for (const [code, choice] of rows) {
+        if (!/^[a-zA-Z0-9_.-]{1,80}$/.test(code) || !out.options.includes(choice) || labels.has(choice) || codes.has(code)) {
+          return toast('Код и подпись должны быть уникальны, а подпись должна быть в списке вариантов', 'err');
+        }
+        labels.add(choice); codes.add(code);
+      }
+      out.optionCodes = Object.fromEntries(rows.map(([code, choice]) => [choice, code]));
+    }
     if (out.type === 'group') { out.itemLabel = $('#f_il', m).value.trim(); out.subfields = parseSubfields($('#f_sub', m).value); if (!out.subfields.length) return toast('Опишите хотя бы одно поле внутри записи', 'err'); }
     if (!patientLevel) out.showIf = $('#f_ck', m).value ? { key: $('#f_ck', m).value, op: $('#f_co', m).value, value: $('#f_cv', m).value } : null;
     m.close(); done(out);
@@ -351,6 +423,8 @@ function indicatorDialog(reg, ind, done) {
   const i = ind ? clone(ind) : { id: uid('i'), name: '', et: reg.eventTypes[0]?.id, denom: null, num: { key: '', op: 'eq', value: '' }, target: '', lowerBetter: true };
   const m = modal(`<h3>Показатель качества</h3><div class="grid">
     <div class="fld wide"><label class="flab">Название</label><input class="inp" id="i_n" value="${esc(i.name)}"></div>
+    <div class="fld"><label class="flab">Тип расчёта</label><select class="inp" id="i_kind">${Object.entries(RegistryMeasure.types).map(([id, label]) => `<option value="${id}" ${(i.kind || 'proportion') === id ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
+    <div class="fld wide" id="i_measure"></div>
     <div class="fld"><label class="flab">Тип события</label><select class="inp" id="i_et">${reg.eventTypes.map(e => `<option value="${e.id}" ${i.et === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>
     <div class="fld"><label class="flab">Цель, %</label><div class="row"><select class="inp" id="i_lb"><option value="1">не больше</option><option value="0" ${!i.lowerBetter ? 'selected' : ''}>не меньше</option></select><input class="inp" type="number" id="i_t" value="${esc(i.target)}"></div></div>
     <div class="fld wide"><label class="flab" for="i_ref">Обоснование цели: источник (статья, рекомендация, решение совета регистра)</label><textarea class="inp" id="i_ref" rows="2" placeholder="Например: Staiger RD и соавт., Br J Surg 2022;109:1274. Порог 75-го перцентиля медиан центров">${esc(i.ref || '')}</textarea></div>
@@ -363,12 +437,31 @@ function indicatorDialog(reg, ind, done) {
       <select class="inp" data-c="o">${Object.entries(OPS).map(([k, v]) => `<option value="${k}" ${c?.op === k ? 'selected' : ''}>${v}</option>`).join('')}</select><input class="inp" data-c="v" value="${esc(c?.value || '')}" placeholder="значение">`;
   };
   const rd = (box) => ({ key: $('[data-c=k]', box).value, op: $('[data-c=o]', box).value, value: $('[data-c=v]', box).value });
-  const draw = () => { condUI($('#i_den', m), i.denom, true); condUI($('#i_num', m), i.num, false); };
+  const draw = () => {
+    const kind = $('#i_kind', m).value;
+    const numeric = formFields(etById(reg, $('#i_et', m).value)).filter(field => ['number', 'calc'].includes(field.type));
+    const choices = (key, none) => (none ? '<option value="">По условию числителя</option>' : '') + numeric.map(field => `<option value="${esc(field.key)}" ${i.measure?.[key] === field.key ? 'selected' : ''}>${esc(field.label)}</option>`).join('');
+    $('#i_measure', m).innerHTML = kind === 'change' ? '<label>Числовое поле в первой и последней записи<select class="inp" id="i_field">' + choices('field') + '</select></label>'
+      : kind === 'rate' ? '<label>Поле с днями наблюдения<select class="inp" id="i_exposure">' + choices('exposure') + '</select></label><label>Количество событий<select class="inp" id="i_count">' + choices('count', true) + '</select></label><label>Показывать на<select class="inp" id="i_scale">'
+        + [100, 1000, 10000].map(value => '<option ' + (value === (i.measure?.scale || 1000) ? 'selected' : '') + '>' + value + '</option>').join('') + '</select></label>'
+      : kind === 'time' ? '<p>Отсчёт от начала эпизода. Событие определяется условием числителя. Если исход не наступил, наблюдение заканчивается датой последней оценки с известным ответом.</p>' : '';
+    $('#i_t', m).closest('.fld').hidden = kind !== 'proportion';
+    $('#i_num', m).closest('.fld').hidden = kind === 'change';
+    condUI($('#i_den', m), i.denom, true);
+    condUI($('#i_num', m), i.num, false);
+  };
+  $('#i_kind', m).onchange = draw;
   $('#i_et', m).onchange = () => { i.denom = null; i.num = { key: '', op: 'eq', value: '' }; draw(); }; draw();
   $('#i_ok', m).onclick = () => {
     const d = rd($('#i_den', m)), n = rd($('#i_num', m));
-    if (!$('#i_n', m).value.trim() || !n.key) return toast('Укажите название и числитель', 'err');
-    m.close(); done({ ...i, name: $('#i_n', m).value.trim(), et: $('#i_et', m).value, denom: d.key ? d : null, num: n, target: $('#i_t', m).value === '' ? '' : Number($('#i_t', m).value), ref: $('#i_ref', m).value.trim(), lowerBetter: $('#i_lb', m).value === '1' });
+    const kind = $('#i_kind', m).value;
+    const measure = { field: $('#i_field', m)?.value, exposure: $('#i_exposure', m)?.value,
+      count: $('#i_count', m)?.value, scale: Number($('#i_scale', m)?.value || 1000) };
+    if (!$('#i_n', m).value.trim() || (kind === 'change' && !measure.field)
+      || (kind === 'rate' && (!measure.exposure || (!measure.count && !n.key))) || (['proportion', 'time'].includes(kind) && !n.key)) {
+      return toast('Укажите название и поля для расчёта', 'err');
+    }
+    m.close(); done({ ...i, kind, measure, name: $('#i_n', m).value.trim(), et: $('#i_et', m).value, denom: d.key ? d : null, num: n, target: $('#i_t', m).value === '' ? '' : Number($('#i_t', m).value), ref: $('#i_ref', m).value.trim(), lowerBetter: $('#i_lb', m).value === '1' });
   };
 }
 
@@ -446,13 +539,15 @@ Routes.patients = async (main, regId = '', listId = '') => {
   if ($('#newPAI')) $('#newPAI').onclick = () => { const r = regs.find(x => x.id === regId) || regs[0]; if (!r) return toast('Сначала создайте регистр', 'err'); AI.fullParse(r, null); };
 };
 
-async function patientDialog(p, regs, regId) {
+async function patientDialog(p, regs, regId, intake) {
   if (!regs.length) return toast('Сначала создайте регистр', 'err');
-  const isNew = !p; p = p ? clone(p) : { registryId: regId || regs[0].id, center: Auth.user.center || '', data: {}, consent: '' };
+  const isNew = !p;
+  p = p ? clone(p) : { registryId: regId || regs[0].id, center: intake?.center ?? Auth.user.center ?? '',
+    localId: intake?.patientNumber || '', data: {}, consent: '' };
   const reg = () => regs.find(r => r.id === $('#pd_reg', m).value) || regs[0];
   const m = modal(`<h2>${isNew ? 'Новый пациент' : 'Данные пациента'}</h2>
     <div class="grid">
-      <div class="fld"><label class="flab">Регистр <i class="req">*</i></label>${regSelect(regs, p.registryId, 'pd_reg', false).replace('<select', `<select ${isNew ? '' : 'disabled'}`)}</div>
+      <div class="fld"><label class="flab">Регистр <i class="req">*</i></label>${regSelect(regs, p.registryId, 'pd_reg', false).replace('<select', `<select ${isNew && !intake ? '' : 'disabled'}`)}</div>
       <div class="fld"><label class="flab">Основной идентификатор</label><select class="inp" id="pd_idt">${['№ истории болезни', 'ИИН', 'Паспорт', 'Другой'].map(o => `<option ${(p.idType || '№ истории болезни') === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
       <div class="fld"><label class="flab" id="pd_idl">${esc(p.idType && p.idType !== '№ истории болезни' ? p.idType : '№ истории болезни / локальный ID')} <i class="req">*</i></label><input class="inp" id="pd_id" value="${esc(p.localId || '')}"></div>
       <div class="fld wide"><label class="flab">Другие идентификаторы (по одному в строке «Тип: номер»)</label><textarea class="inp" id="pd_ids" rows="2" placeholder="Паспорт: N1234567&#10;№ амбулаторной карты: 45-221">${esc((p.ids || []).map(i => i.type + ': ' + i.value).join('\n'))}</textarea></div>
@@ -463,7 +558,7 @@ async function patientDialog(p, regs, regId) {
       <div class="fld"><label class="flab">Отчество</label><input class="inp" id="pd_mn" value="${esc(p.middleName || '')}"></div>
       <div class="fld"><label class="flab">Дата рождения <i class="req">*</i></label><input class="inp" type="date" id="pd_bd" value="${esc(p.birthDate || '')}"></div>
       <div class="fld"><label class="flab">Пол <i class="req">*</i></label><select class="inp" id="pd_sx"><option></option><option ${p.sex === 'М' ? 'selected' : ''}>М</option><option ${p.sex === 'Ж' ? 'selected' : ''}>Ж</option></select></div>
-      <div class="fld"><label class="flab">Центр</label>${centerSelect(p.center ?? Auth.user.center, 'pd_ce')}</div>
+      <div class="fld"><label class="flab">Центр</label>${intake ? `<input class="inp" id="pd_ce" value="${esc(p.center)}" readonly>` : centerSelect(p.center ?? Auth.user.center, 'pd_ce')}</div>
       <div class="fld"><label class="flab">Email</label><input class="inp" id="pd_em" value="${esc(p.email || '')}"></div>
       <div class="fld"><label class="flab">Телефон (WhatsApp)</label><input class="inp" id="pd_ph" value="${esc(p.phone || '')}" placeholder="+7 7xx xxx xx xx"></div>
       <div class="fld"><label class="flab">Согласие на анкеты (PROMs)</label><select class="inp" id="pd_pc"><option value=""></option>${['да', 'нет'].map(o => `<option ${p.promsConsent === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
@@ -472,7 +567,7 @@ async function patientDialog(p, regs, regId) {
       <div class="fld"><label class="flab">Согласие на включение в регистр</label><select class="inp" id="pd_cs"><option value=""></option>${['получено', 'не получено', 'не требуется'].map(o => `<option ${p.consent === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
     </div>
     <div id="pd_extra"></div>
-    <div class="row between"><button class="btn ai" id="pd_ai">✦ Из документа (ИИ)</button><button class="btn primary" id="pd_ok">${isNew ? 'Создать и открыть карточку' : 'Сохранить'}</button></div>`, { wide: true });
+    <div class="row between"><button class="btn ai" id="pd_ai">✦ Из документа (ИИ)</button><button class="btn primary" id="pd_ok">${intake ? 'Создать и вернуться к документу' : isNew ? 'Создать и открыть карточку' : 'Сохранить'}</button></div>`, { wide: true });
   const users = await Data.users();
   const drawExtra = () => { const r = reg(); $('#pd_extra', m).innerHTML = (r.patientFields || []).length ? `<fieldset class="sec"><legend>Дополнительно</legend><div class="grid">${r.patientFields.map(f => fieldInput(f, p.data?.[f.key], users)).join('')}</div></fieldset>` : ''; };
   drawExtra(); $('#pd_reg', m).onchange = drawExtra;
@@ -494,12 +589,22 @@ async function patientDialog(p, regs, regId) {
     if (v('pd_bd') > today()) return toast('Дата рождения в будущем', 'err');
     if (v('pd_iin') && !/^\d{12}$/.test(v('pd_iin'))) return toast('ИИН: 12 цифр', 'err');
     if (v('pd_vs') === 'умер' && v('pd_dd') && v('pd_dd') < v('pd_bd')) return toast('Дата смерти раньше даты рождения', 'err');
-    const dup = (await Data.patients(reg().id)).find(x => x.localId === v('pd_id') && x.id !== p.id);
+    if (intake?.patientNumber && v('pd_id').toUpperCase() !== intake.patientNumber.toUpperCase()) {
+      return toast('Номер карты отличается от номера в очереди. Проверьте источник документа', 'err');
+    }
+    const dup = (await Data.patients(reg().id)).find(x => x.center === v('pd_ce') && x.id !== p.id
+      && String(x.localId || '').trim().toUpperCase() === v('pd_id').toUpperCase());
+    if (dup && intake) return toast('В этом учреждении уже есть карточка с таким номером. Выберите её при проверке документа', 'err');
     if (dup && !(await confirmBox(`Пациент с номером ${v('pd_id')} уже есть (${pname(dup)}). Всё равно сохранить?`))) return;
     Object.assign(p, { registryId: reg().id, localId: v('pd_id'), lastName: v('pd_ln'), firstName: v('pd_fn'), middleName: v('pd_mn'), birthDate: v('pd_bd'), sex: v('pd_sx'), phone: v('pd_ph'), email: v('pd_em'), center: v('pd_ce'), consent: v('pd_cs'), idType: v('pd_idt'), iin: v('pd_iin'), funding: v('pd_fu'), promsConsent: v('pd_pc'), vital: v('pd_vs'), deathDate: v('pd_vs') === 'умер' ? v('pd_dd') : '', data: { ...(p.data || {}), ...readForm($('#pd_extra', m)) } });
     p.ids = $('#pd_ids', m).value.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const i = l.indexOf(':'); return i > 0 ? { type: l.slice(0, i).trim(), value: l.slice(i + 1).trim() } : { type: 'ID', value: l }; });
     if (!p.seq) p.seq = (await DB.all('patients')).reduce((mx, x) => Math.max(mx, x.seq || 0), 0) + 1;
-    try { const saved = await DB.put('patients', p); m.close(); toast('Сохранено'); go('patient/' + saved.id); }
+    try {
+      const saved = await DB.put('patients', p);
+      m.close(); toast('Сохранено');
+      if (intake) await intake.onCreated(saved.id);
+      else go('patient/' + saved.id);
+    }
     catch (error) { toast(error.message, 'err'); }
   };
 }
@@ -512,6 +617,7 @@ Routes.patient = async (main, id) => {
   const ev = allEv.filter(e => e.patientId === id).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const epList = reg ? Episodes.list(reg, ev, [p]) : [];
   const epLink = epList.length > 1 ? Episodes.link(reg, ev) : new Map();
+  const epOrphans = new Set(reg ? Episodes.orphans(reg, ev).map(e => e.id) : []);
   const epNo = new Map(epList.map((e, i) => [e.id, i + 1]));
   const pr = proms.filter(x => x.patientId === id).sort((a, b) => a.due.localeCompare(b.due));
   const pm = mdts.flatMap(mt => (mt.cases || []).filter(c => c.patientId === id).map(c => ({ ...c, mt })));
@@ -527,7 +633,7 @@ Routes.patient = async (main, id) => {
       const vals = computeValues(reg, p, et, e.data, e.date); const c = completeness(et, vals);
       const shown = formFields(et).filter(f => condOK(f.showIf, vals) && !isEmpty(vals[f.key]));
       return `<div class="tl" style="--c:${et.color}"><div class="tl-dot"></div><div class="tl-body">
-        <div class="row between"><div><b class="tl-t">${esc(et.name)}</b> ${epLink.has(e.id) ? `<span class="tag" title="Эпизод регистра">эпизод ${epNo.get(epLink.get(e.id))}</span> ` : ''}<span class="muted">${esc(et.dateLabel || 'Дата')}: <b>${fmtDate(e.date)}</b></span></div>
+        <div class="row between"><div><b class="tl-t">${esc(et.name)}</b> ${epOrphans.has(e.id) ? `<span class="tag badt" title="Внешний номер эпизода не совпал ни с одним эпизодом пациента. Запись не входит в расчёты.">эпизод ${esc(e.externalEncounterId)} не найден</span> ` : ''}${epLink.has(e.id) ? `<span class="tag" title="Эпизод регистра">эпизод ${epNo.get(epLink.get(e.id))}</span> ` : ''}<span class="muted">${esc(et.dateLabel || 'Дата')}: <b>${fmtDate(e.date)}</b></span></div>
         <div class="row">${e.locked ? '<span class="tag lockt">🔒</span>' : ''}${e.verified ? '<span class="tag okt" title="Проверено с первичной документацией">✓ SDV</span>' : ''}${(() => { const n = qs.filter(q => q.eventId === e.id && q.status !== 'закрыт').length; return n ? `<span class="tag warnt">⚑ ${n}</span>` : ''; })()}${e.status === 'черновик' ? '<span class="tag warnt">черновик</span>' : ''}<span class="tag ${c.pct < 100 ? 'warnt' : 'okt'}" title="${esc(c.missing.join(', '))}">полнота ${c.pct}%</span>${can('edit') ? `<button class="btn xs" data-ed="${e.id}">Открыть</button>` : `<button class="btn xs" data-ed="${e.id}">Просмотр</button>`}</div></div>
         <div class="kv">${shown.slice(0, 14).map(f => `<div><b>${esc(f.label)}</b><span>${showVal(f, vals[f.key], users)}</span></div>`).join('')}${shown.length > 14 ? `<div class="muted">и ещё ${shown.length - 14}…</div>` : ''}</div>
         ${c.missing.length ? `<div class="miss">${formFields(et).filter(f => f.type !== 'calc' && (f.required || f.key_) && condOK(f.showIf, vals) && isEmpty(vals[f.key])).slice(0, 8).map(f => `<a href="javascript:void 0" class="tlmiss ${f.required ? 'rq' : 'ds'}" data-jmp="${e.id}|${f.key}">⚠ ${esc(f.label)}: не отвечено</a>`).join(' ')}${c.missing.length > 8 ? ` <span class="muted">и ещё ${c.missing.length - 8}</span>` : ''}</div>` : ''}</div></div>`;
@@ -563,14 +669,22 @@ Routes.patient = async (main, id) => {
 };
 
 async function eventDialog(p, reg, ev) {
-  const et = etById(reg, ev.type); const isNew = !ev.id; const ro = !isNew && (!can('edit') || ev.locked);
+  const archived = ev.id && ev.schemaVersion !== reg.version && reg.schemaHistory?.find(version => version.version === ev.schemaVersion);
+  const formRegistry = archived ? { ...reg, ...archived } : reg;
+  const et = etById(formRegistry, ev.type) || etById(reg, ev.type);
+  const isNew = !ev.id, ro = !isNew && (!can('edit') || ev.locked);
+  const encounterType = Episodes.isPatient(reg) ? reg.episode?.anchorForm || reg.eventTypes[0]?.id : Episodes.opener(reg);
+  if (!et) return toast('Форма события больше недоступна в словаре регистра', 'err');
   const users = await Data.users();
-  const m = modal(`<div class="row between"><div class="evhead" style="border-color:${et.color}"><h2>${esc(et.name)}</h2><div class="muted">${esc(pname(p))} · № ИБ ${esc(p.localId)}</div></div>${ro ? '' : '<button class="btn ai" id="evAI">✦ Заполнить из документа (ИИ)</button>'}</div>
+  const m = modal(`<div class="row between"><div class="evhead" style="border-color:${et.color}"><h2>${esc(et.name)}</h2><div class="muted">${esc(pname(p))} · № ИБ ${esc(p.localId)}${archived ? ' · форма v' + archived.version : ''}</div></div>${ro ? '' : '<button class="btn ai" id="evAI">✦ Заполнить из документа (ИИ)</button>'}</div>
     <div class="row between"><div class="fld" style="max-width:260px"><label class="flab">${esc(et.dateLabel || 'Дата')} <i class="req">*</i></label><input class="inp" type="date" id="evDate" value="${esc(ev.date || (ev.out30Due ? '' : today()))}" ${ro ? 'disabled' : ''}></div><div class="row" id="evStatus"></div></div>
+    ${et.id === encounterType || ev.externalEncounterId ? `<div class="fld"><label class="flab" for="evExternal">Внешний номер эпизода</label>
+      <input class="inp" id="evExternal" maxlength="120" value="${esc(ev.externalEncounterId || '')}" ${ro ? 'disabled' : ''}>
+      <span class="fhint">Номер госпитализации, приёма или вмешательства из журнала или папки с документами.</span></div>` : ''}
     ${ev.out30Due ? `<div class="fld"><label for="evOut30Checked" class="flab">Дата проверки исхода 30 дней</label><input class="inp" type="date" id="evOut30Checked" min="${esc(ev.out30Due)}" max="${today()}" value="${esc(ev.out30CheckedOn || '')}" ${ro ? 'disabled' : ''}><span class="fhint">Укажите дату, когда проверено, что исход известен как минимум до ${fmtDate(ev.out30Due)}.</span></div>` : ''}
     ${ev.locked ? '<div class="miss">Событие заблокировано после проверки. Изменения возможны только после разблокировки руководителем (с указанием причины).</div>' : ''}
     ${ev.followDue ? `<div class="fhint" id="evFollow" style="margin:4px 0 8px">Запись для срока наблюдения ${fmtDate(ev.followDue)}. Дата должна быть не раньше ${fmtDate(addDays(ev.followDue, -((Episodes.rule(et) || {}).early || 0)))}: оценка раньше срока за этот срок не засчитывается.</div>` : ''}
-    <div id="evEp"></div><div id="evForm"></div><div id="evQA"></div>
+    <div id="evEp"></div><div id="evForm"></div><details class="card" id="evAiEvidence" hidden><summary>Цитаты из документа</summary><div id="evAiQuotes"></div></details><div id="evQA"></div>
     <div class="row between sticky-bottom"><div>${!isNew && can('delete') ? '<button class="btn danger" id="evDel">Удалить событие</button>' : ''}</div>
     <div class="row"><span class="muted" id="evErr"></span>${ro ? '' : '<button class="btn" id="evDraft">Сохранить черновик</button><button class="btn primary" id="evSave">Сохранить</button>'}</div></div>`, { full: true });
   if (!isNew && !ro && ev.status === 'завершено' && !can('users')) { const d = $('#evDate', m); d.disabled = true; d.title = 'Дату сохранённой записи меняет администратор'; d.insertAdjacentHTML('afterend', ' <a href="javascript:void 0" class="small" id="evFix">запросить исправление</a>'); setTimeout(() => { const a = $('#evFix', m); if (a) a.onclick = () => correctionDialog(p, ev); }, 0); }
@@ -586,32 +700,93 @@ async function eventDialog(p, reg, ev) {
     }
   }
   const draftKey = ev.id || ('new-' + (ev.anchorEventId || ''));
-  let read = renderEventForm(formRoot, reg, p, et, ev.data || {}, ev.date || today(), users, draftKey);
-  if ($('#evAI', m)) $('#evAI', m).onclick = () => AI.dialog({ title: `${et.name} (${reg.name})`, fields: formFields(et), users, dateLabel: et.dateLabel || 'Дата', onApply: (take, date, ow) => {
-    const cur = read().data; const filled = [];
-    Object.entries(take).forEach(([k, v]) => { if (ow || isEmpty(cur[k])) { cur[k] = v; filled.push(k); } });
-    if (date && (ow || !ev.id)) $('#evDate', m).value = date;
-    read = renderEventForm(formRoot, reg, p, et, cur, $('#evDate', m).value, users, draftKey);
+  const dateInput = $('#evDate', m);
+  const aiDraft = { evidence: { ...(ev.aiEvidence || {}) }, defaultDate: !ev.date && !ev.out30Due };
+  dateInput.addEventListener('input', () => { aiDraft.defaultDate = false; });
+  dateInput.addEventListener('change', () => { aiDraft.defaultDate = false; });
+  let read = renderEventForm(formRoot, formRegistry, p, et, ev.data || {}, ev.date || today(), users, draftKey, aiDraft);
+  const showEvidence = data => {
+    const quotes = AI.matchingEvidence(data, aiDraft.evidence);
+    const fields = formFields(et).filter(field => quotes[field.key]);
+    $('#evAiEvidence', m).hidden = !fields.length;
+    $('#evAiQuotes', m).innerHTML = fields.map(field => {
+      const item = quotes[field.key];
+      return `<p class="fhint"><b>${esc(field.label)}</b> <q>${esc(item.quote)}</q>${item.verified === false ? ' · цитата требует проверки' : ''}
+        ${item.fileId || item.intakeId ? `<button class="btn xs" type="button" data-ai-source="${esc(field.key)}">${esc(item.fileName || 'Источник')}${item.page ? ' · стр. ' + item.page : ''}</button>` : item.fileName ? ' · ' + esc(item.fileName) : ''}</p>`;
+    }).join('');
+    $$('[data-ai-source]', m).forEach(button => button.onclick = () => DocumentInbox.openSource(quotes[button.dataset.aiSource], p.id));
+  };
+  aiDraft.onRestore = () => showEvidence(read().data);
+  formRoot.addEventListener('change', () => {
+    if (Object.keys(aiDraft.evidence).length) showEvidence(read().data);
+  });
+  showEvidence(ev.data || {});
+  if ($('#evAI', m)) $('#evAI', m).onclick = () => AI.dialog({ title: `${et.name} (${reg.name})`, fields: formFields(et), users, dateLabel: et.dateLabel || 'Дата', onApply: (take, date, overwrite, evidence) => {
+    const cur = read().data;
+    const filled = [];
+    for (const [key, value] of Object.entries(take)) {
+      if (!overwrite && !isEmpty(cur[key])) continue;
+      cur[key] = value;
+      filled.push(key);
+      if (evidence[key]) aiDraft.evidence[key] = evidence[key];
+      else delete aiDraft.evidence[key];
+    }
+    const needDate = !date && aiDraft.defaultDate && filled.length > 0;
+    if (date && !dateInput.disabled && (overwrite || isNew)) {
+      dateInput.value = date;
+      aiDraft.defaultDate = false;
+    } else if (needDate && !dateInput.disabled) {
+      dateInput.value = '';
+      aiDraft.defaultDate = false;
+    }
+    read = renderEventForm(formRoot, formRegistry, p, et, cur, dateInput.value, users, draftKey, aiDraft);
     read.saveAutosave?.();
+    showEvidence(cur);
     filled.forEach(k => $(`[data-wrap="${k}"]`, m)?.classList.add('ai-filled'));
     eventQA(m, p, reg, et, ev, () => App.route());
-    toast(`ИИ заполнил полей: ${filled.length}. Проверьте подсвеченные.`);
+    toast(`ИИ заполнил полей: ${filled.length}. ${needDate ? 'Укажите дату события вручную.' : 'Проверьте подсвеченные.'}`);
   } });
   if (ro) { $('#evForm', m).dataset.ro = '1'; $$('input,select,textarea,button[data-cadd],button[data-crm],button[data-gadd],button[data-gdel]', $('#evForm', m)).forEach(x => x.disabled = true); }
   eventQA(m, p, reg, et, ev, () => App.route());
   const save = async (draft) => {
-    const date = $('#evDate', m).value; if (!date) return toast('Укажите дату', 'err');
-    const { data, all } = read();
+    const date = AI.eventDate(dateInput.value);
+    if (!date) { dateInput.focus(); return toast('Укажите дату события', 'err'); }
+    const current = read();
+    const archivedKeys = new Set(formFields(et).map(field => field.key));
+    const data = { ...Object.fromEntries(Object.entries(ev.data || {}).filter(([key]) => key !== '_na' && !archivedKeys.has(key))), ...current.data };
+    const all = current.all;
     const errs = validateEvent(et, all);
     if (errs.length && !draft) { $('#evErr', m).innerHTML = `<span class="bad">${esc(errs.slice(0, 3).join('; '))}${errs.length > 3 ? ` и ещё ${errs.length - 3}` : ''}</span>`; return toast('Есть незаполненные обязательные поля. Можно сохранить как черновик.', 'err'); }
     const { out30Due, ...record } = ev;
+    if (date !== ev.date) delete record.dateEvidence;
+    const external = $('#evExternal', m);
+    if (external) {
+      if (external.value.trim()) record.externalEncounterId = external.value.trim();
+      else delete record.externalEncounterId;
+    }
+    const aiEvidence = AI.matchingEvidence(data, aiDraft.evidence);
+    if (Object.keys(aiEvidence).length) record.aiEvidence = aiEvidence;
+    else delete record.aiEvidence;
     if (!draft && ev.followDue && date < addDays(ev.followDue, -((Episodes.rule(et) || {}).early || 0))) return toast(`Дата раньше срока наблюдения (${fmtDate(ev.followDue)}). Укажите дату фактической оценки или сохраните черновик.`, 'err');
     const check = $('#evOut30Checked', m);
     if (check?.value && (check.value < out30Due || check.value > today())) return toast('Проверьте дату подтверждения исхода', 'err');
     if (check) record.out30CheckedOn = check.value;
     const epSel = $('#evEpisode', m);
     if (epSel) { if (epSel.value) record.anchorEventId = epSel.value; else delete record.anchorEventId; }
-    const obj = { ...record, patientId: p.id, registryId: reg.id, type: et.id, date, data, status: draft ? 'черновик' : 'завершено', schemaVersion: reg.version };
+    const obj = { ...record, patientId: p.id, registryId: reg.id, type: et.id, date, data, status: draft ? 'черновик' : 'завершено', schemaVersion: archived?.version || reg.version };
+    if (!draft && reg.crossChecks?.length) {
+      const violations = ClinicalRules.violations(reg, p, obj, await Data.events(reg.id));
+      if (violations.length) {
+        const reason = await promptBox(violations.map(item => item.label).join(' · ') + '. Укажите причину, чтобы сохранить, или вернитесь к форме.');
+        if (!reason?.trim()) return;
+        obj.ruleException = { rules: violations.map(item => item.id), reason: reason.trim(), by: Auth.user.id, at: nowISO() };
+      } else delete obj.ruleException;
+    }
+    if (record.verified && (date !== ev.date || JSON.stringify(data) !== JSON.stringify(ev.data || {}) || obj.anchorEventId !== ev.anchorEventId || obj.externalEncounterId !== ev.externalEncounterId)) {
+      obj.verified = false;
+      delete obj.verifiedAt;
+      delete obj.verifiedBy;
+    }
     try { await DB.put('events', obj); }
     catch (error) { return toast(error.message, 'err'); }
     read.clearAutosave?.();
@@ -688,7 +863,7 @@ Routes.audit = async (main) => {
 /* ---------- ПОЛЬЗОВАТЕЛИ И НАСТРОЙКИ ---------- */
 Routes.admin = async (main) => {
   const users = await Data.users();
-  main.innerHTML = `<div class="head"><h1>Пользователи и настройки</h1><button class="btn primary" id="uAdd">+ Пользователь</button></div>
+  main.innerHTML = `<div class="head"><h1>Пользователи и настройки</h1>${NET.on ? '<a class="btn" href="#admin-center">Кабинет администратора</a>' : ''}<button class="btn primary" id="uAdd">+ Пользователь</button></div>
     <div class="card"><table class="tbl"><thead><tr><th>ФИО</th><th>Логин</th><th>Роль</th><th>Должность</th><th>Код для бенчмаркинга</th><th>Центр</th><th>Статус</th><th></th></tr></thead><tbody>${users.map(u => `<tr><td><b>${esc(u.name)}</b></td><td class="mono">${esc(u.login)}</td><td>${esc(ROLES[u.role]?.name)}</td><td>${esc(u.position || '')}</td><td class="mono">${esc(u.code || '')}</td><td>${esc(u.center || '')}</td><td>${u.active === false ? '<span class="bad">отключён</span>' : 'активен'}</td><td><button class="btn xs" data-ue="${u.id}">✎</button></td></tr>`).join('')}</tbody></table></div>
     <div class="card"><h3>Права ролей</h3><table class="tbl small"><thead><tr><th>Роль</th>${Object.values(PERM_NAMES).map(n => `<th>${n}</th>`).join('')}</tr></thead><tbody>${Object.entries(ROLES).map(([k, r]) => `<tr><td><b>${r.name}</b></td>${Object.keys(PERM_NAMES).map(p => `<td>${r.perms.includes(p) ? '✓' : ''}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
     <div class="card"><h3>Учреждение</h3><div class="grid"><div class="fld"><label class="flab">Учреждение</label><input class="inp" id="st_c" value="${esc(Settings.data.center || '')}"></div><div class="fld"><label class="flab">Отделение</label><input class="inp" id="st_d" value="${esc(Settings.data.department || '')}"></div>

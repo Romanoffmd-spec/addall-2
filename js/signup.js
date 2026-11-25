@@ -25,7 +25,7 @@ const PASS_T = ['очень слабый', 'слабый', 'средний', 'х
 const fullName = (a, b, c) => [a, b, c].map(x => String(x || '').trim()).filter(Boolean).join(' ');
 
 /* ---------- страница входа и регистрации ---------- */
-Pages.login = async function (mode = 'login') {
+Pages.login = async function (mode = 'login', receipt = null) {
   document.body.className = '';
   const selfReg = Settings.data.selfReg !== false;
   if (!selfReg && mode === 'reg') mode = 'login';
@@ -33,7 +33,8 @@ Pages.login = async function (mode = 'login') {
   const tabs = selfReg ? `<div class="aseg"><button class="${mode === 'login' ? 'on' : ''}" data-am="login">Вход</button><button class="${mode === 'reg' ? 'on' : ''}" data-am="reg">Регистрация</button></div>` : '';
   let body = '';
   if (mode === 'wait') {
-    body = `<div class="await"><div class="await-i">⏳</div><h2>Заявка отправлена</h2><p class="muted">Администратор проверит данные, подтвердит роль, отделение и доступ к регистрам. После этого войдите с тем же логином и паролем.</p><button class="btn primary block" data-am="login">Ко входу</button></div>`;
+    body = `<div class="await"><div class="await-i">⏳</div><h2>Заявка отправлена</h2>${receipt?.number ? '<p>Номер заявки <strong id="signupReceipt">' + esc(receipt.number) + '</strong></p>' : ''}
+      <p class="muted">Администратор проверит данные, подтвердит роль, отделение и доступ к регистрам. После этого войдите с тем же логином и паролем.</p><button class="btn primary block" data-am="login">Ко входу</button></div>`;
   } else if (mode === 'forgot') {
     body = `<h2 class="ah">Восстановление пароля</h2><p class="muted small">Сервера нет, поэтому письмо не придёт. Заявка уйдёт администратору платформы: он задаст временный пароль и передаст его вам лично.</p>
       <div class="fld"><label class="flab">Логин или рабочая почта</label><input class="inp" id="f_login"></div>
@@ -41,6 +42,7 @@ Pages.login = async function (mode = 'login') {
       <button class="btn primary block" id="f_go">Отправить заявку</button><button class="linkbtn" data-am="login">← Ко входу</button>`;
   } else if (mode === 'reg') {
     body = `<h2 class="ah">Регистрация</h2><p class="muted small">Доступ к данным откроется после подтверждения администратором. Поля со * обязательны.</p>
+      ${typeof NET !== 'undefined' && NET.on ? '' : '<p class="muted small">Здесь учётная запись сохраняется в этом браузере. Для входа с других устройств откройте адрес вашего сервера AddAll.</p>'}
       <div class="asec">Личные данные</div>
       <div class="grid g3">
         <div class="fld"><label class="flab">Фамилия <i class="req">*</i></label><input class="inp" id="r_ln" autocomplete="family-name"></div>
@@ -85,7 +87,7 @@ Pages.login = async function (mode = 'login') {
     const go_ = async () => {
       if (await Auth.login($('#l_login').value, $('#l_pass').value)) return App.boot();
       const m = { pending: 'Заявка ещё ждёт подтверждения администратором.', rejected: 'Заявка на доступ отклонена. Обратитесь к администратору.', off: 'Учётная запись отключена. Обратитесь к администратору.', locked: `Вход заблокирован после 3 неудачных попыток до ${Auth.lockedUntil ? new Date(Auth.lockedUntil).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : ''}. Можно подождать или обратиться к администратору.`, expired: 'Срок действия учётной записи истёк. Обратитесь к администратору.', bad2: 'Неверный логин или пароль. Осталось попыток: 2.', bad1: 'Неверный логин или пароль. Осталась 1 попытка, затем вход заблокируется на 15 минут.' }[Auth.lastErr] || 'Неверный логин или пароль';
-      const e = $('#l_err'); e.textContent = m; e.style.display = '';
+      const e = $('#l_err'); e.textContent = m + (Auth.applicationNumber ? ' Номер заявки ' + Auth.applicationNumber + '.' : ''); e.style.display = '';
     };
     $('#l_go').onclick = go_; $('#l_pass').onkeydown = e => { if (e.key === 'Enter') go_(); };
   }
@@ -120,16 +122,29 @@ Pages.login = async function (mode = 'login') {
       if ($('#r_pw').value.length < 8 || passScore($('#r_pw').value) < 2) return toast('Пароль слабый: минимум 8 символов, буквы и цифры', 'err');
       if ($('#r_pw').value !== $('#r_pw2').value) return toast('Пароли не совпадают', 'err');
       if (!$('#r_ok').checked) return toast('Подтвердите обязательство о конфиденциальности', 'err');
-      const all = await DB.all('users');
-      if (all.some(x => x.login?.toLowerCase() === v('r_lg').toLowerCase())) return toast('Такой логин уже зарегистрирован', 'err');
+      const button = $('#r_go');
+      if (button.disabled) return;
+      button.disabled = true;
+      try {
       const u = { id: uid('u_'), name: fullName(v('r_ln'), v('r_fn'), v('r_mn')), lastName: v('r_ln'), firstName: v('r_fn'), middleName: v('r_mn'), login: v('r_lg'), email: v('r_em'),
         role, reqRole: role, position: pos, dept, resYear: v('r_yr'), resSpec: v('r_sp'), center: v('r_ce'), phone: v('r_ph'), orcid: v('r_or'), reqRegs: [], work: v('r_wk'), regAccess: [], note: v('r_cm'),
         code: '', active: false, status: 'pending', createdAt: nowISO(), agreedAt: nowISO() };
-      await setUserPassword(u, $('#r_pw').value);
-      try { await DB.rawPut('users', u); }
-      catch (error) { return toast(error.message, 'err'); }
+      const password = $('#r_pw').value;
+      if (typeof NET !== 'undefined' && NET.on) {
+        const key = 'addall2.signup.' + u.login.normalize('NFKC').toLowerCase();
+        const requestId = sessionStorage.getItem(key) || Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+        sessionStorage.setItem(key, requestId);
+        const receipt = await NET.call('POST', 'signup', { ...u, requestId, password, agreed: true });
+        return Pages.login('wait', receipt);
+      }
+      const all = await DB.all('users');
+      if (all.some(x => x.login?.toLowerCase() === u.login.toLowerCase())) return toast('Такой логин уже зарегистрирован', 'err');
+      await setUserPassword(u, password);
+      await DB.rawPut('users', u);
       await DB.rawPut('audit', { id: uid('au_'), ts: nowISO(), user: u.id, userName: u.name, action: 'регистрация (заявка)', store: 'users', recId: u.id });
       Pages.login('wait');
+      } catch (error) { toast(error.message || 'Не удалось отправить заявку. Повторите отправку.', 'err'); }
+      finally { button.disabled = false; }
     };
   }
 };
@@ -208,17 +223,30 @@ userDialog = async function (u, approving) {
     ${regs.length ? `<div class="fld"><label class="flab">Дополнительный доступ к регистрам других отделений</label><p class="fhint" style="margin:0 0 6px">Регистры своего отделения сотрудник видит и без этого.</p><div class="rchk">${regs.filter(r => !u?.dept || r.dept !== u.dept || acc.has(r.id)).map(r => `<label class="chk"><input type="checkbox" value="${r.id}" data-ra ${acc.has(r.id) ? 'checked' : ''}> <span>${esc(r.name)} <span class="muted small">${esc(r.dept || '')}</span></span></label>`).join('')}</div></div>` : ''}
     <div class="row end">${approving ? '<button class="btn" id="u_no">Отклонить</button>' : ''}<button class="btn primary" id="u_ok">${approving ? 'Подтвердить доступ' : 'Сохранить'}</button></div>`, { wide: true });
   bindDept(m, 'u_dep'); bindPos(m, 'u_pos');
-  if (approving) $('#u_no', m).onclick = async () => { u.status = 'rejected'; u.active = false; await DB.put('users', u, 'заявка отклонена'); m.close(); toast('Заявка отклонена'); App.route(); };
+  if (approving) $('#u_no', m).onclick = async () => {
+    if (typeof NET !== 'undefined' && NET.on && location.hash.startsWith('#admin-center')) {
+      await AdminCenter.account('reject-account', u);
+      if ((await DB.get('users', u.id))?.status === 'rejected') m.close();
+      return;
+    }
+    u.status = 'rejected'; u.active = false;
+    await DB.put('users', u, 'заявка отклонена'); m.close(); toast('Заявка отклонена'); App.route();
+  };
   $('#u_ok', m).onclick = async () => {
     const v = id => ($('#' + id, m)?.value || '').trim();
     const name = fullName(v('u_ln'), v('u_fn'), v('u_mn'));
     if (!name || !v('u_l')) return toast('ФИО и логин обязательны', 'err');
-    if (all.some(x => x.login.toLowerCase() === v('u_l').toLowerCase() && x.id !== u?.id)) return toast('Такой логин уже есть', 'err');
+    if (all.some(x => x.login?.toLowerCase() === v('u_l').toLowerCase() && x.id !== u?.id)) return toast('Такой логин уже есть', 'err');
     const extra = { name, lastName: v('u_ln'), firstName: v('u_fn'), middleName: v('u_mn'), login: v('u_l'), role: v('u_r'), dept: readDept(m, 'u_dep'), position: readPos(m, 'u_pos'), resYear: v('u_yr'), supervisor: v('u_sup'), center: v('u_ce'), code: v('u_c'), phone: v('u_ph'), orcid: v('u_or'), regAccess: $$('[data-ra]:checked', m).map(c => c.value) };
+    const save = $('#u_ok', m);
+    if (save.disabled) return;
+    save.disabled = true;
+    try {
     if (isNew) {
       if ($('#u_pw', m).value.length < 6) return toast('Пароль от 6 символов', 'err');
-      const nu = await Auth.createUser({ name, login: v('u_l'), pass: $('#u_pw', m).value, role: v('u_r'), position: extra.position, code: v('u_c') });
-      Object.assign(nu, extra, { status: 'active' }); await DB.put('users', nu);
+      const nu = { ...extra, active: true, status: 'active', mustChange: true, expiresAt: v('u_exp') };
+      await setUserPassword(nu, $('#u_pw', m).value);
+      await DB.put('users', nu, 'учётная запись создана администратором');
     } else {
       if (u.id === Auth.user.id && v('u_r') !== 'admin' && !all.some(x => x.id !== u.id && x.role === 'admin' && x.active !== false)) return toast('Нельзя снять роль с последнего администратора', 'err');
       Object.assign(u, extra);
@@ -229,6 +257,9 @@ userDialog = async function (u, approving) {
       if (u.id === Auth.user.id) Object.assign(Auth.user, u);
     }
     m.close(); toast(approving ? 'Доступ подтверждён' : 'Сохранено'); App.route();
+    return true;
+    } catch (error) { toast(error.message, 'err'); }
+    finally { save.disabled = false; }
   };
 };
 
@@ -322,10 +353,10 @@ function noAccessPage(main, r) {
 }
 
 const _registry = Routes.registry;
-Routes.registry = async (main, id, tab = 'general') => {
+Routes.registry = async (main, id, tab = 'general', mode = '') => {
   await loadRegs(); const r = REGS.get(id); if (!r) return go('registries');
   if (!regAllowed(r)) return noAccessPage(main, r);
-  await _registry(main, id, tab === 'access' ? 'general' : tab);
+  await _registry(main, id, tab === 'access' ? 'general' : tab, mode);
   const nreq = (r.requests || []).filter(q => q.status === 'ждёт').length;
   $('.tabs', main).insertAdjacentHTML('beforeend', `<a href="#registry/${id}/access" class="${tab === 'access' ? 'on' : ''}">Доступ${nreq && regManage(r) ? ` <span class="tag warnt">${nreq}</span>` : ''}</a>`);
   if (tab !== 'access') return;
@@ -334,7 +365,7 @@ Routes.registry = async (main, id, tab = 'general') => {
   const users = (await DB.all('users')).filter(u => u.active !== false);
   const save = async (msg) => { await DB.put('registries', r, msg); toast('Сохранено'); App.route(); };
   const mg = regManage(r);
-  const withAccess = users.map(u => { const prev = Auth.user; Auth.user = u; const w = regAccess(r); Auth.user = prev; return [u, w]; }).filter(x => x[1]);
+  const withAccess = users.map(u => [u, regAccess(r, u)]).filter(x => x[1]);
   const UN = id => users.find(u => u.id === id)?.name || '?';
   const reqs = (r.requests || []).filter(q => q.status === 'ждёт');
   $('#rgBody').innerHTML = `

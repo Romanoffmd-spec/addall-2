@@ -10,7 +10,7 @@ const NA_REASONS = { unk: 'неизвестно', na: 'не применимо',
 {
   const _render = renderEventForm;
   const bindings = new WeakMap();
-  renderEventForm = function (root, reg, patient, et, data, eventDate, users, eventKey) {
+  renderEventForm = function (root, reg, patient, et, data, eventDate, users, eventKey, aiDraft) {
     bindings.get(root)?.abort();
     const controller = new AbortController();
     bindings.set(root, controller);
@@ -23,7 +23,10 @@ const NA_REASONS = { unk: 'неизвестно', na: 'не применимо',
     const dateInput = dialog?.querySelector('#evDate');
     const checkedInput = dialog?.querySelector('#evOut30Checked');
     const storage = () => typeof NET !== 'undefined' && NET.on ? sessionStorage : localStorage;
-    const current = () => ({ data: { ...readForm(root), _na: { ...na } }, date: dateInput?.value, checkedOn: checkedInput?.value });
+    const current = () => ({
+      data: { ...readForm(root), _na: { ...na } }, date: dateInput?.value, checkedOn: checkedInput?.value,
+      ...(aiDraft ? { aiEvidence: aiDraft.evidence, defaultDate: aiDraft.defaultDate } : {})
+    });
     const initial = JSON.stringify(current());
     const saveLocal = () => {
       if (!autosaveKey) return;
@@ -69,7 +72,14 @@ const NA_REASONS = { unk: 'неизвестно', na: 'не применимо',
 
     try {
       const saved = autosaveKey && JSON.parse(storage().getItem(autosaveKey) || 'null');
-      if (saved?.data && JSON.stringify({ data: saved.data, date: saved.date, checkedOn: saved.checkedOn }) !== initial) {
+      const restored = saved?.data && {
+        data: saved.data, date: saved.date, checkedOn: saved.checkedOn,
+        ...(aiDraft ? {
+          aiEvidence: saved.aiEvidence ?? aiDraft.evidence,
+          defaultDate: saved.defaultDate ?? (saved.date === dateInput?.value && aiDraft.defaultDate)
+        } : {})
+      };
+      if (restored && JSON.stringify(restored) !== initial) {
         const bar = document.createElement('div');
         bar.className = 'card warn autosave-bar';
         bar.innerHTML = `Есть несохранённый ввод от ${fmtDT(saved.at)}. <button type="button" class="btn xs primary" data-as="1">Восстановить</button> <button type="button" class="btn xs" data-as="0">Удалить</button>`;
@@ -87,8 +97,13 @@ const NA_REASONS = { unk: 'неизвестно', na: 'не применимо',
           Object.assign(na, saved.data._na || {});
           if (dateInput && saved.date !== undefined) dateInput.value = saved.date;
           if (checkedInput && saved.checkedOn !== undefined) checkedInput.value = saved.checkedOn;
-          read = _render(root, reg, patient, et, { ...(data || {}), ...saved.data }, dateInput?.value || eventDate, users);
+          read = _render(root, reg, patient, et, { ...(data || {}), ...saved.data }, dateInput ? dateInput.value : eventDate, users);
           decorate();
+          if (aiDraft) {
+            aiDraft.evidence = restored.aiEvidence;
+            aiDraft.defaultDate = restored.defaultDate;
+            aiDraft.onRestore?.();
+          }
           toast('Ввод восстановлен, проверьте и сохраните');
         };
       }
