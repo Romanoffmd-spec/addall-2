@@ -576,7 +576,7 @@ const IO = {
 Routes.io = async (main) => {
   if (!can('export')) { main.innerHTML = '<div class="head"><h1>Импорт и экспорт</h1></div><p>Доступ ограничен вашей ролью.</p>'; return; }
   const regs = await Data.registries();
-  main.innerHTML = `<div class="head"><h1>Импорт и экспорт</h1><a class="btn primary" href="#registry-export">Комплект регистра · Excel, CSV и JSON</a></div>
+  main.innerHTML = `<div class="head"><h1>Импорт и экспорт</h1><a class="btn primary" href="#registry-export" title="Excel, CSV, SPSS, Stata, R, SAS, REDCap, CDISC ODM, FHIR">Выгрузка регистра: все форматы</a></div>
     <div class="cols"><div class="card"><h3>Экспорт данных</h3>${regSelect(regs, '', 'exReg', false)}
       <div class="fld"><label class="flab">Формат</label><select class="inp" id="exFmt"><option value="wide">Широкая таблица: 1 пациент = 1 строка (повторяемые события: последнее)</option><option value="long">Длинная таблица: 1 событие = 1 строка (по типу события)</option></select></div>
       <div class="fld" id="exEtW" style="display:none"><label class="flab">Тип события</label><select class="inp" id="exEt"></select></div>

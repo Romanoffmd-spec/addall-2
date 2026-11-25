@@ -137,3 +137,15 @@ if (typeof TRAINING_CHAPTERS !== 'undefined' && typeof TrainingGuide === 'object
     ] });
   TrainingGuide.steps = TRAINING_CHAPTERS.flatMap((chapter, c) => chapter.steps.map((step, i) => ({ ...step, chapter, c, i })));
 }
+
+/* главы из дополнительных модулей ставятся рядом с близкими по смыслу, а не в конец гайда */
+if (typeof TRAINING_CHAPTERS !== 'undefined' && typeof TrainingGuide === 'object') {
+  const after = [['double', 'form'], ['deaths', 'out30'], ['passport', 'period'], ['compare', 'passport'], ['riskmodel', 'analytics'], ['feedback', 'surgeon'], ['interop', 'io'], ['datarequests', 'dsr']];
+  for (const [id, anchor] of after) {
+    const from = TRAINING_CHAPTERS.findIndex(c => c.id === id); if (from < 0) continue;
+    const [chapter] = TRAINING_CHAPTERS.splice(from, 1);
+    const at = TRAINING_CHAPTERS.findIndex(c => c.id === anchor);
+    TRAINING_CHAPTERS.splice(at < 0 ? TRAINING_CHAPTERS.length - 1 : at + 1, 0, chapter);
+  }
+  TrainingGuide.steps = TRAINING_CHAPTERS.flatMap((chapter, c) => chapter.steps.map((step, i) => ({ ...step, chapter, c, i })));
+}

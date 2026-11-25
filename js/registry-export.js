@@ -245,7 +245,11 @@ Routes['registry-export'] = async (main, regId = '') => {
       <label class="chk" title="Постоянный ID пациента AddAll одинаков во всех выгрузках: данные разных выгрузок можно связать. Без отметки коды пациентов новые в каждом файле: так безопаснее для передачи наружу"><input type="checkbox" id="bxPid">Код пациента: постоянный ID AddAll (для связи выгрузок)</label></div>
       <div class="row"><button class="btn" id="bxChooseFields">Выбрать поля</button><span id="bxFieldNote" class="muted">Все разрешённые поля</span></div>
       <p class="muted">В режиме без идентификаторов исключаются номера карт, ФИО, контакты, свободный текст и поля, помеченные как чувствительные. Даты заменяются днями от начала наблюдения.</p>
-      <div class="row"><button class="btn primary" data-bx="xlsx">Excel</button><button class="btn" data-bx="csv">ZIP с CSV</button><button class="btn" data-bx="json">JSON</button></div>
+      <h3>Таблицы</h3><div class="row"><button class="btn primary" data-bx="xlsx">Excel</button><button class="btn" data-bx="csv">ZIP с CSV</button><button class="btn" data-bx="json">JSON (полный комплект AddAll)</button></div>
+      <h3>Статистические программы</h3><p class="muted small">CSV по каждой форме и готовый файл с метками переменных и расшифровкой вариантов ответа.</p>
+      <div class="row"><button class="btn" data-bx="spss">SPSS</button><button class="btn" data-bx="stata">Stata</button><button class="btn" data-bx="r">R</button><button class="btn" data-bx="sas">SAS</button></div>
+      <h3>Другие регистры и международные стандарты</h3>
+      <div class="row"><button class="btn" data-bx="redcap">REDCap (словарь и данные)</button><button class="btn" data-bx="odm">CDISC ODM 1.3 (структура и данные)</button><a class="btn" href="#interop">HL7 FHIR R4</a></div>
       <p id="bxSummary" role="status"></p></section>`;
   let chosenFields = null;
   const readField = id => $('#' + id, main);
