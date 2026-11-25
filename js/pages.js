@@ -15,7 +15,7 @@ const Pages = {
         <div class="fld"><label class="flab">Пароль (от 6 символов) <i class="req">*</i></label><input class="inp" type="password" id="s_pass"></div>
         <div class="fld"><label class="flab">Пароль ещё раз <i class="req">*</i></label><input class="inp" type="password" id="s_pass2"></div>
       </div>
-      <div class="row end"><button class="btn" id="s_train">Открыть учебный режим</button><button class="btn" id="s_restore">Восстановить из резервной копии</button><button class="btn primary" id="s_go">Создать и войти</button></div>
+      <div class="row end">${/^https?:$/.test(location.protocol) ? '' : '<button class="btn" id="s_train">Открыть учебный режим</button>'}<button class="btn" id="s_restore">Восстановить из резервной копии</button><button class="btn primary" id="s_go">Создать и войти</button></div>
     </div></div>`;
     $('#s_go').onclick = async () => {
       const v = id => $('#' + id).value.trim();
@@ -29,7 +29,7 @@ const Pages = {
       location.hash = 'registries'; App.boot();
     };
     $('#s_restore').onclick = () => IO.restorePicker();
-    $('#s_train').onclick = () => setTraining(true);
+    if ($('#s_train')) $('#s_train').onclick = () => setTraining(true);
   },
   login() {
     document.body.className = '';

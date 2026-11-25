@@ -197,8 +197,10 @@ Pages.login = async function (mode = 'login', ...args) {
   if (mode === 'login') {
     const [us, pts] = await Promise.all([DB.all('users'), DB.all('patients')]);
     $('.auth-brand', box).nextElementSibling?.insertAdjacentHTML('afterend', `<div class="lcount"><div><b>${us.filter(u => u.active !== false).length}</b><span>зарегистрировано сотрудников</span></div><div><b>${pts.length}</b><span>пациентов в регистрах</span></div></div>`);
-    box.insertAdjacentHTML('beforeend', `<p class="fhint" style="text-align:center">Вводите пароль внимательно: после 3 неудачных попыток вход блокируется на 15 минут.</p><button class="linkbtn" id="trTgl">${TRAIN ? 'Выйти из учебного режима' : 'Учебный режим (вымышленные пациенты)'}</button>`);
-    $('#trTgl').onclick = () => setTraining(!TRAIN);
+    /* на сайте и сервере вход в учебный режим только изнутри, после входа: кнопка на странице входа есть лишь в локальной копии */
+    const showTrain = TRAIN || !/^https?:$/.test(location.protocol);
+    box.insertAdjacentHTML('beforeend', `<p class="fhint" style="text-align:center">Вводите пароль внимательно: после 3 неудачных попыток вход блокируется на 15 минут.</p>${showTrain ? `<button class="linkbtn" id="trTgl">${TRAIN ? 'Выйти из учебного режима' : 'Учебный режим (вымышленные пациенты)'}</button>` : '<p class="fhint" style="text-align:center">Учебный режим открывается после входа: меню «Учебный режим».</p>'}`);
+    if ($('#trTgl')) $('#trTgl').onclick = () => setTraining(!TRAIN);
   }
   if (TRAIN) box.insertAdjacentHTML('afterbegin', '<div class="trainflag">Учебный режим</div>');
 };
@@ -276,6 +278,12 @@ async function setTraining(on) {
       try { await addTrainingSchemas(target, templates); } finally { target.close(); }
       sessionStorage.setItem('addall2.trainingSourceUser', Auth.user.id);
     }
+    /* пропуск в учебный режим выдаётся только вошедшему сотруднику (не учебному пользователю) */
+    if (on && /^https?:$/.test(location.protocol)) {
+      if (!Auth.user || TRAIN) { toast('Учебный режим доступен после входа в систему', 'err'); return; }
+      localStorage.setItem('addall2.trainPass', JSON.stringify({ user: Auth.user.id, exp: Date.now() + TRAIN_PASS_HOURS * 3600000 }));
+    }
+    if (!on) localStorage.removeItem('addall2.trainPass');
     localStorage.setItem('addall2.mode', on ? 'train' : 'live');
     sessionStorage.removeItem('addall2_uid');
     location.hash = '';

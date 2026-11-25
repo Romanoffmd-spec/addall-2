@@ -206,3 +206,13 @@ NAV_ICONS.interop = NAV_ICONS.interop || NAV_ICONS.io || NAV_ICONS.me;
     return groups;
   };
 }
+
+if (typeof TRAINING_CHAPTERS !== 'undefined' && typeof TrainingGuide === 'object') {
+  const end = TRAINING_CHAPTERS.findIndex(c => c.id === 'end');
+  TRAINING_CHAPTERS.splice(end < 0 ? TRAINING_CHAPTERS.length : end, 0,
+    { id: 'interop', name: 'Обмен FHIR и HL7', page: 'interop', go: 'interop', steps: [
+      { t: '#ioOut', title: 'Выгрузка в другие системы', text: 'Регистр выгружается в международном формате FHIR: пациенты с ID AddAll, поля форм, диагнозы МКБ-10, анкеты.' },
+      { t: '#inFile', title: 'Загрузка из больничных систем', text: 'Файл FHIR или HL7 v2 из МИС или лаборатории: пациенты находятся по ИИН, коды анализов сопоставляются с полями формы, данные сохраняются черновиками.' }
+    ] });
+  TrainingGuide.steps = TRAINING_CHAPTERS.flatMap((chapter, c) => chapter.steps.map((step, i) => ({ ...step, chapter, c, i })));
+}

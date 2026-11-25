@@ -92,15 +92,18 @@ const Feedback = {
 };
 
 Routes.feedback = async (main, qid = '') => {
-  const qs = Feedback.quarters(4), qu = qs.find(x => x.id === qid) || qs[0];
+  const qs = Feedback.quarters(8);
+  let qu = qs.find(x => x.id === qid) || qs[0], rep = null, note = '';
+  /* без выбранного квартала показывается последний закрытый квартал, где есть ваши случаи */
+  if (!qid) for (const x of qs) { const r = await Feedback.build(x); if (r.parts.length) { if (x.id !== qs[0].id) note = `За ${qs[0].name} ваших случаев нет, показан ${x.name}.`; qu = x; rep = r; break; } }
   main.innerHTML = `<div class="head"><h1>Отчёт обратной связи</h1><div class="row"><select class="inp" id="fbQ" aria-label="Квартал">${qs.map(x => `<option value="${x.id}" ${x.id === qu.id ? 'selected' : ''}>${x.name}</option>`).join('')}</select><button class="btn" id="fbSave">Сохранить отчёт</button></div></div>
     <div class="card"><p>Каждый квартал отчёт собирается автоматически: после окончания квартала приходит уведомление. В отчёте ваши показатели за квартал рядом с общими по регистру${Feedback.forCenter() ? ' и показатели вашего учреждения среди других учреждений' : ''}.</p></div>
     <div id="fbBody"><p class="muted">Собираю отчёт…</p></div>`;
   $('#fbQ', main).onchange = e => go('feedback/' + e.target.value);
-  const rep = await Feedback.build(qu);
+  if (!rep) rep = await Feedback.build(qu);
   const box = $('#fbBody', main); if (!box) return;
-  box.innerHTML = Feedback.html(rep);
-  if (qu.id === qs[0].id) { Feedback.markSeen(qu.id); if (typeof Bell === 'object') Bell.refresh(); }
+  box.innerHTML = (note ? `<p class="muted">${esc(note)}</p>` : '') + Feedback.html(rep);
+  if (!qid || qu.id === qs[0].id) { Feedback.markSeen(qs[0].id); if (typeof Bell === 'object') Bell.refresh(); }
   $('#fbSave', main).onclick = () => download(`Отчёт обратной связи ${qu.name}.html`, `<!doctype html><meta charset="utf-8"><title>Отчёт обратной связи ${esc(qu.name)}</title><style>body{font-family:Arial,sans-serif;margin:24px;color:#1b2340}table{border-collapse:collapse;width:100%;margin:8px 0}td,th{border-bottom:1px solid #dde;padding:5px 7px;text-align:left;font-size:13px}.bad{color:#b42318}.ok{color:#18794e}.muted{color:#667}.tag{font-size:11px;border:1px solid #cc9;border-radius:6px;padding:0 4px}</style><h1>Отчёт обратной связи: ${esc(qu.name)}</h1><p>${esc(Auth.user.name || '')}${Auth.user.center ? ', ' + esc(Auth.user.center) : ''}. Сформирован ${fmtDate(today())}.</p>${Feedback.html(rep)}`, 'text/html');
 };
 
@@ -122,7 +125,7 @@ if (typeof Bell === 'object') {
   Bell.items = async function () {
     const out = await previous();
     const qu = Feedback.quarters(1)[0];
-    if ((Feedback.forDoctor() || Feedback.forCenter()) && Feedback.seen() !== qu.id) out.unshift({ k: 'warn', t: 'Готов отчёт обратной связи', s: qu.name, r: 'feedback/' + qu.id });
+    if ((Feedback.forDoctor() || Feedback.forCenter()) && Feedback.seen() !== qu.id) out.unshift({ k: 'warn', t: 'Готов отчёт обратной связи', s: qu.name, r: 'feedback' });
     return out;
   };
 }

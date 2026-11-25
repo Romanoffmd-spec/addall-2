@@ -125,7 +125,18 @@ function parseCSV(text) {
 const DB_VERSION = 9;
 const STORES = ['users', 'registries', 'patients', 'events', 'mdt', 'proms', 'audit', 'settings', 'saved', 'queries', 'trials', 'alloc', 'screening', 'journals', 'jrecs', 'files', 'comments', 'refs', 'docs', 'doctpl', 'coverage', 'tasks', 'recon', 'releases', 'periodApprovals', 'secondEntries', 'datarequests'];
 /* учебный режим: отдельная база-песочница с вымышленными пациентами */
-const TRAIN = (() => { try { return localStorage.getItem('addall2.mode') === 'train'; } catch (e) { return false; } })();
+/* Учебный режим на сайте или сервере открывается только после входа одобренного сотрудника: вход выдаёт пропуск на 12 часов.
+   Без пропуска (кто-то вручную включил режим или пропуск истёк) открывается обычная страница входа.
+   Локальная копия из файлов (file://) открывает учебный режим без входа, как раньше. */
+const TRAIN_PASS_HOURS = 12;
+const TRAIN = (() => { try {
+  if (localStorage.getItem('addall2.mode') !== 'train') return false;
+  if (/^https?:$/.test(location.protocol)) {
+    const pass = JSON.parse(localStorage.getItem('addall2.trainPass') || 'null');
+    if (!pass || !(pass.exp > Date.now()) || !pass.user) { localStorage.setItem('addall2.mode', 'live'); localStorage.removeItem('addall2.trainPass'); return false; }
+  }
+  return true;
+} catch (e) { return false; } })();
 const DB = {
   db: null,
   open() {
