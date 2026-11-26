@@ -46,7 +46,7 @@ if (typeof TRAINING_CHAPTERS !== 'undefined' && typeof TrainingGuide === 'object
       { t: '#inForms', keep: true, title: 'ИИ разложил выписку по формам', text: 'Справа то, что ИИ нашёл: какие события регистра описаны в документе (например, включение, операция, гистология), их даты и значения полей. Галочками отмечено то, что подтверждено цитатой. Любое значение можно исправить или снять.' },
       { t: '#inForms [data-in-quote]', keep: true, opt: true, title: 'Цитата к каждому значению', text: 'Нажмите на цитату: в тексте документа подсветится место, откуда взято значение. Так проверка занимает секунды.' },
       { t: '#inPatient', keep: true, title: 'Пациент', text: 'Если № ИБ из документа совпал с карточкой в регистре, пациент выбран автоматически. Если пациента ещё нет, кнопка «Создать карточку пациента» откроет карточку с номером, а ИИ сам заполнит ФИО, дату рождения и пол из документа.' },
-      { t: '#pd_ln', keep: true, opt: true, act: async () => { await AIGuide.click('#inNewPatient'); await AIGuide.until(() => $('#pd_ln') && $('#pd_ln').value); }, title: 'Карточка заполнена из документа', text: 'Карточка нового пациента открыта поверх документа: № ИБ, фамилия, имя, дата рождения и пол уже взяты из выписки. Врач проверяет и сохраняет, после этого возвращается к документу с выбранным пациентом.' },
+      { t: () => $('#pd_ln')?.closest('.modal') || null, keep: true, opt: true, act: async () => { await AIGuide.click('#inNewPatient'); await AIGuide.until(() => $('#pd_ln') && $('#pd_ln').value); }, title: 'Карточка заполнена из документа', text: 'Карточка нового пациента открыта поверх документа: № ИБ, фамилия, имя, дата рождения и пол уже взяты из выписки. Врач проверяет и сохраняет, после этого возвращается к документу с выбранным пациентом.' },
       { t: '#inApply', act: () => AIGuide.openInbox('known'), title: 'Пациент найден сам', text: 'Это документ пациента, который уже есть в регистре: он выбран по № ИБ. «Сохранить выбранные поля» записывает формы в регистр черновиками с цитатами. Врач потом дополняет и завершает их. Без подтверждения человеком в регистр ничего не попадает.' }
     ] },
     { id: 'ai-newpatient', name: 'ИИ: новый пациент из выписки', page: 'home', go: 'home', steps: [
@@ -84,11 +84,11 @@ if (typeof TRAINING_CHAPTERS !== 'undefined' && typeof TrainingGuide === 'object
       { t: '#idOut', act: async () => { await AIGuide.click('#idAI'); await AIGuide.until(() => $('#idOut') && $('#idOut').children.length); }, title: 'Предложения ИИ', text: 'Вопрос, дизайн, какие поля нужны, ограничения. Тему можно сохранить как черновик рукописи.' }
     ] },
     { id: 'ai-mm', name: 'ИИ: черновик разбора M&M', page: 'mm', go: 'mm', steps: [
-      { t: '[data-mmai]', opt: true, title: 'Черновик разбора', text: 'Для случая из пакета M&M ИИ собирает хронологию по формам и документам с цитатами и 5-7 вопросов для обсуждения, без оценки вины.' },
+      { t: '[data-mmai]', opt: true, act: () => TrainingGuide.mmWide(), title: 'Черновик разбора', text: 'Для случая из пакета M&M ИИ собирает хронологию по формам и документам с цитатами и 5-7 вопросов для обсуждения, без оценки вины.' },
       { t: '#mdOut', opt: true, act: async () => { const b = $('[data-mmai]'); if (b) { b.click(); await AIGuide.until(() => $('#mdOut') && $('#mdOut').textContent.trim().length > 20, 8000); } }, title: 'Хронология и вопросы', text: 'Цитаты, которых нет в документах, помечаются. Черновик сохраняется к пакету M&M и правится вручную.' }
     ] },
     { id: 'aiquality', name: 'ИИ: точность автозаполнения', page: 'aiquality', go: 'aiquality', steps: [
-      { t: '#aqTable', opt: true, title: 'Где ИИ ошибается', text: 'По каждому полю: сколько значений ИИ предложил и сколько врач оставил без правки, примеры исправлений. Поля с низкой точностью проверяйте внимательнее. Пока сохранений нет, таблица пустая.' }
+      { t: '#aqTable', act: () => TrainingGuide.seedAIQuality(), title: 'Где ИИ ошибается', text: 'По каждому полю: сколько значений ИИ предложил и сколько врач оставил без правки, примеры исправлений. Поля с низкой точностью проверяйте внимательнее. В учебной базе гайд добавил примеры, чтобы таблица была заполнена.' }
     ] },
     { id: 'ai-brief', name: 'ИИ: брифинг и ассистент', page: 'home', go: 'home', steps: [
       { t: '#briefOut', act: async () => { await AIGuide.click('#hBrief'); await AIGuide.until(() => $('#briefOut') && $('#briefOut').textContent.trim().length > 20); }, opt: true, title: 'Брифинг на сегодня', text: 'Кнопка «Брифинг ИИ»: что важно сегодня, просроченные наблюдения, анкеты, запросы. В ИИ уходят только числа.' },
@@ -97,5 +97,8 @@ if (typeof TRAINING_CHAPTERS !== 'undefined' && typeof TrainingGuide === 'object
   ];
   const at = TRAINING_CHAPTERS.findIndex(c => c.id === 'form');
   TRAINING_CHAPTERS.splice(at < 0 ? TRAINING_CHAPTERS.length - 1 : at + 1, 0, ...block);
+  /* двойной ввод включается в конструкторе, поэтому его глава идёт сразу после конструктора */
+  const dbl = TRAINING_CHAPTERS.findIndex(c => c.id === 'double');
+  if (dbl >= 0) { const [chapter] = TRAINING_CHAPTERS.splice(dbl, 1); const reg = TRAINING_CHAPTERS.findIndex(c => c.id === 'registry'); TRAINING_CHAPTERS.splice(reg < 0 ? TRAINING_CHAPTERS.length - 1 : reg + 1, 0, chapter); }
   TrainingGuide.steps = TRAINING_CHAPTERS.flatMap((chapter, c) => chapter.steps.map((step, i) => ({ ...step, chapter, c, i })));
 }
