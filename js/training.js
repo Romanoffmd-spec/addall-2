@@ -40,7 +40,7 @@ const TRAINING_CHAPTERS = [
     { t: '#hNewAI', opt: true, title: 'Пациент из документа', text: 'ИИ-помощник читает выписку или протокол и предлагает заполнить поля. Каждое значение проверяет и подтверждает врач. Работает, только если ИИ настроен администратором.' },
     { t: '#main .kpis', title: 'Плитки-счётчики', text: 'Слева направо: сколько пациентов и событий в регистрах; сколько записей внесено за 7 дней; сколько наблюдений просрочено; анкеты к заполнению; открытые запросы по данным; полнота ключевых полей. Нажатие на плитку открывает соответствующий раздел.' },
     { t: '#main .kpi[href="#quality"]', opt: true, title: 'Полнота ключевых полей', text: 'Доля заполненных обязательных полей во всех сохранённых событиях. Поле с указанной причиной («неизвестно», «не применимо») считается отвеченным. Подробности по каждому полю в разделе «Качество данных».' },
-    { t: trCard('Требует внимания'), opt: true, title: 'Требует внимания', text: 'Пациенты, у которых прошёл срок планового контакта (наблюдения), и анкеты к заполнению. Нажмите на пациента, чтобы открыть карточку и внести наблюдение.' },
+    { t: trCard('Требует внимания'), opt: true, title: 'Требует внимания', text: 'С чего начать день: задачи наблюдения, срок которых уже прошёл (те же, что в разделе «Очередь наблюдения»), и анкеты к заполнению. Нажмите на пациента, чтобы открыть карточку и внести нужную форму. Если написано «Нет», всё внесено вовремя.' },
     { t: trCard('Показатели качества'), opt: true, title: 'Показатели качества', text: 'Плитки по показателям регистра, например несостоятельность анастомоза или летальность за 30 дней. В плитке: процент, 95% доверительный интервал по Уилсону, сколько случаев учтено и цель. Если случаев меньше 10, вывод не делается: так и написано в плитке.' },
     { t: '#main .qi-btn', opt: true, title: 'Плитка показателя', text: 'Нажмите на плитку: откроется расшифровка. Видно, какие пациенты попали в числитель, у кого поле не заполнено (они не учтены), и откуда взята цель. Из расшифровки можно перейти в карточку пациента и дозаполнить данные.' }
   ] },
@@ -93,7 +93,7 @@ const TRAINING_CHAPTERS = [
     { t: '#g_status', opt: true, title: 'Статус', text: '«черновик» для настройки, «пилот» для пробного сбора, «активный» для рабочего сбора, «закрыт» когда сбор завершён и данные только читаются.' },
     { t: '#g_fu', opt: true, title: 'Интервал наблюдения', text: 'Через сколько месяцев ждать следующего контакта с пациентом. По нему считаются просроченные наблюдения на главной странице.' },
     { t: '#g_start', opt: true, title: 'Точка отсчёта', text: 'Событие, от которого считаются сроки: обычно операция. От него считаются 30-дневные исходы и выживаемость.' },
-    { t: trCard('Действия'), opt: true, title: 'Действия с регистром', text: '«Экспорт структуры» сохраняет формы в файл, чтобы перенести регистр в другую больницу. «Дублировать» создаёт копию для доработки. «Удалить регистр» удаляет его вместе с данными, поэтому требует подтверждения.' },
+    { t: trCard('Действия'), opt: true, act: () => TrainingGuide.regTab('general'), title: 'Действия с регистром', text: '«Экспорт структуры» сохраняет формы в файл, чтобы перенести регистр в другую больницу. «Дублировать» создаёт копию для доработки. «Удалить регистр» удаляет его вместе с данными, поэтому требует подтверждения.' },
     { t: '#rgSave', opt: true, title: 'Сохранить', text: 'Сохраняет изменения конструктора. Каждое сохранение повышает версию схемы, и в отчётах видно, по какой версии собирались данные.' }
   ] },
   { id: 'followup', name: 'Очередь наблюдения', page: 'followup', go: 'followup', steps: [
@@ -129,8 +129,8 @@ const TRAINING_CHAPTERS = [
     { t: '#prHistory', title: 'Выпущенные версии', text: 'Любую версию можно открыть и сравнить с предыдущей, скачать результаты в CSV или весь снимок в JSON. Так через год можно объяснить каждую цифру отчёта.' }
   ] },
   { id: 'mm', name: 'Пакет к M&M', page: 'mm', go: 'mm', steps: [
-    { t: '#main .head', title: 'Пакет к M&M', text: 'Готовит материалы к конференции по осложнениям и летальности. Платформа сама находит случаи за период: смерть, осложнения Clavien-Dindo IIIa и выше, повторные операции, несостоятельность анастомоза.' },
-    { t: '#mmReg', title: 'Регистр и период', text: 'Выберите регистр и даты. По умолчанию берётся прошлый месяц.' },
+    { t: '#main .head', act: () => TrainingGuide.mmWide(), title: 'Пакет к M&M', text: 'Готовит материалы к конференции по осложнениям и летальности. Платформа сама находит случаи за период: смерть, осложнения Clavien-Dindo IIIa и выше, повторные операции, несостоятельность анастомоза.' },
+    { t: '#mmReg', title: 'Регистр и период', text: 'Выберите регистр и даты. По умолчанию берётся прошлый месяц. В учебной базе гайд уже расширил период на все учебные операции, чтобы в списке были случаи.' },
     { t: '#main .card.noprint', title: 'Список случаев', text: 'Найденные случаи с причиной, по которой они попали в список, и баллом CCI. Отметьте галочкой те, что будут разбираться. Счётчик показывает время по регламенту, чтобы уложиться в отведённые минуты.' },
     { t: '#main .mm-pack', opt: true, title: 'Готовый пакет', text: 'По каждому выбранному случаю: краткая хронология и вопросы для обсуждения. Что произошло, можно ли было предотвратить, что меняем в практике, кто отвечает и к какому сроку.' },
     { t: '#mmPrint', title: 'Печать / PDF', text: 'Печатает пакет или сохраняет его в PDF для раздачи участникам.' }
@@ -166,8 +166,9 @@ const TRAINING_CHAPTERS = [
     { t: '#dbGrid', title: 'Графики', text: 'Каждый график можно скачать как картинку (SVG, PNG) для презентации или как таблицу (CSV) для своей обработки.' }
   ] },
   { id: 'proms', name: 'Анкеты пациентов (PROMs)', page: 'proms', go: 'proms', steps: [
-    { t: '#main .head', title: 'Анкеты пациентов', text: 'PROMs это показатели, которые сообщает сам пациент: качество жизни, функция кишечника (LARS), боль. Анкеты назначаются по расписанию регистра после операции.' },
-    { t: '#main .tabs', title: 'Вкладки', text: '«К заполнению»: анкеты со сроком в ближайшие 14 дней. «Заполненные». «Все». «Сводка»: средние баллы по срокам.' }
+    { t: '#main .head', act: () => TrainingGuide.seedProms(), title: 'Анкеты пациентов', text: 'PROMs это показатели, которые сообщает сам пациент: качество жизни, функция кишечника (LARS), боль. Анкеты назначаются по расписанию регистра после операции.' },
+    { t: '#main .tabs', title: 'Вкладки', text: '«К заполнению»: анкеты со сроком в ближайшие 14 дней. «Заполненные». «Все». «Сводка»: средние баллы по срокам.' },
+    { t: '#main table.tbl, #main .empty, #main .card:last-of-type', title: 'Список анкет', text: 'Гайд добавил учебные анкеты: часть ждёт ответа, часть уже заполнена. «Заполнить» открывает анкету для ввода ответов со слов пациента, кнопки WhatsApp и Email отправляют ему ссылку. Баллы считаются сами; на вкладке «Сводка» средние баллы по срокам после операции.' }
   ] },
   { id: 'analytics', name: 'Аналитика', page: 'analytics', go: 'analytics', steps: [
     { t: '#main .an-cfg', title: 'Аналитика', text: 'Здесь строятся таблицы и графики по данным регистра без выгрузки в Excel. Порядок: выбрать когорту, выбрать анализ, нажать «Построить».' },
@@ -177,7 +178,7 @@ const TRAINING_CHAPTERS = [
     { t: '#aCfg', title: 'Параметры', text: 'Какая форма и какое поле. Набор параметров меняется в зависимости от вида анализа.' },
     { t: '#aRun', title: 'Построить', text: 'Считает и показывает результат ниже. Формулы стандартные и описаны в документации: интервалы Уилсона, точные биномиальные границы, формула Гринвуда для выживаемости.' },
     { t: '#aSave', title: 'Сохранить', text: 'Сохраняет настройку анализа, чтобы потом построить его одним нажатием на новых данных.' },
-    { t: '#aOut', title: 'Результат', text: 'Таблица или график. Их можно скачать для статьи или презентации.' }
+    { t: '#aOut', act: async () => { $('#aRun')?.click(); await TrainingGuide.until(() => $('#aOut') && !$('#aOut > .card.muted')); }, title: 'Результат', text: 'Гайд нажал «Построить» с настройками по умолчанию: распределение пациентов по полю, выбранному в параметрах. Таблицу и график можно скачать для статьи или презентации. Меняйте вид анализа и поля и стройте снова.' }
   ] },
   { id: 'report', name: 'Годовой отчёт', page: 'report', go: 'report', steps: [
     { t: '#main .head', title: 'Годовой отчёт', text: 'Отчёт регистра за год в одном документе: объём, показатели качества, характеристики операций, результаты по хирургам, качество данных и методология.' },
@@ -259,6 +260,7 @@ const TrainingGuide = {
     this.running = false;
     this.closeModal();
     this.closeActs();
+    if (this.menuOpened && typeof SB === 'object') { SB.mobile(false); this.menuOpened = false; }
     this.root?.remove();
     this.root = null;
     this.target = null;
@@ -271,10 +273,13 @@ const TrainingGuide = {
   async routeFor(chapter) {
     if (chapter.go === 'PATIENT') {
       if (this.routeName() === 'patient') return location.hash.slice(1);
+      /* карточка с наибольшим числом сохранённых событий: так в хронологии видны все этапы лечения */
       const events = await Data.events();
-      const withEvent = events.find(e => e.status !== 'черновик');
       const patients = await Data.patients();
-      const id = withEvent?.patientId || patients[0]?.id;
+      const count = {};
+      events.filter(e => e.status !== 'черновик').forEach(e => { count[e.patientId] = (count[e.patientId] || 0) + 1; });
+      const best = patients.filter(p => count[p.id] && !p.demoPatient).sort((a, b) => count[b.id] - count[a.id])[0];
+      const id = best?.id || Object.keys(count)[0] || patients[0]?.id;
       return id ? 'patient/' + encodeURIComponent(id) : '';
     }
     if (chapter.go === 'REGISTRY') {
@@ -301,6 +306,117 @@ const TrainingGuide = {
         return;
       }
     } catch (error) { }
+  },
+  /* пакет M&M: по умолчанию прошлый месяц, а учебные операции разбросаны по году;
+     гайд расширяет период до всех учебных данных, чтобы в списке были случаи */
+  async mmWide() {
+    if (this.routeName() !== 'mm' || typeof Routes.mm !== 'function') return;
+    const dates = (await Data.events()).map(e => e.date).filter(Boolean).sort();
+    if (!dates.length) return;
+    const st = Routes.mm.st;
+    if (st && st.from <= dates[0]) return;
+    Routes.mm.st = { from: dates[0], to: today(), pick: null };
+    const regId = decodeURIComponent(location.hash.split('/')[1] || '');
+    await Routes.mm($('#main'), regId);
+  },
+  /* ожидание условия (до ms миллисекунд) */
+  async until(test, ms = 5000) { for (let t = 0; t < ms; t += 120) { const v = test(); if (v) return v; await new Promise(r => setTimeout(r, 120)); } return null; },
+  /* конструктор: открыть нужную вкладку регистра */
+  async regTab(tab) {
+    const [route, id, cur] = location.hash.slice(1).split('/');
+    if (route !== 'registry' || !id || (cur || 'general') === tab) return;
+    go('registry/' + id + '/' + tab);
+    await this.until(() => location.hash.split('/')[2] === tab && $('#rgBody')?.children.length);
+  },
+  /* учебные примеры двойного ввода: форма операции учебного регистра вносится дважды */
+  async seedDouble() {
+    if (!TRAIN || typeof DoubleEntry !== 'object') return;
+    const regs = await Data.registries();
+    const reg = regs.find(r => r.id === 'training-example') || regs.find(r => (r.eventTypes || []).length);
+    if (!reg) return;
+    if (!DoubleEntry.forms(reg).length) {
+      const et = etById(reg, reg.keyDates?.start) || reg.eventTypes[0];
+      et.doubleEntry = true;
+      await DB.put('registries', reg, 'учебный пример: двойной ввод');
+    }
+    const seconds = await DB.all('secondEntries');
+    if (!seconds.some(s => s.registryId === reg.id)) {
+      const items = await DoubleEntry.items(reg);
+      const other = (await Data.users()).find(u => u.id !== Auth.user.id);
+      const otherId = other?.id || 'training-coordinator';
+      /* две записи внёс «другой сотрудник», чтобы была видна кнопка «Внести второй раз» */
+      for (const x of items.slice(2, 4)) { const ev = await DB.get('events', x.ev.id); ev.createdBy = otherId; await DB.put('events', ev, 'учебный пример: первый ввод другим сотрудником'); }
+      for (const [i, x] of items.slice(0, 2).entries()) {
+        const values = clone(x.ev.data || {});
+        if (i === 0) {
+          const f = DoubleEntry.fields(x.et).find(f => f.type === 'number' && values[f.key] != null && values[f.key] !== '')
+            || DoubleEntry.fields(x.et).find(f => f.type === 'select' && (f.options || []).length > 1 && values[f.key]);
+          if (f && f.type === 'number') values[f.key] = Number(values[f.key]) + 10;
+          else if (f) values[f.key] = f.options.map(o => typeof o === 'object' ? o.v ?? o.value ?? o.label : o).find(o => o !== values[f.key]);
+        }
+        const diffs = DoubleEntry.diff(x.et, x.ev.data || {}, values);
+        await DB.put('secondEntries', { registryId: reg.id, patientId: x.p.id, eventId: x.ev.id, eventType: x.et.id, values, firstValues: clone(x.ev.data || {}),
+          firstRev: x.ev.rev || 0, enteredBy: otherId, enteredByName: other?.name || 'Учебный координатор', enteredAt: nowISO(), diffs,
+          status: diffs.length ? 'расхождения' : 'сверено', resolvedBy: diffs.length ? '' : 'совпало при сравнении', resolvedAt: diffs.length ? '' : nowISO(), synthetic: true }, 'учебный пример: второй ввод');
+      }
+    }
+    if (this.routeName() === 'double') await App.route();
+  },
+  async deTab(tab) {
+    if (this.routeName() !== 'double' || typeof Routes.double !== 'function') return;
+    Routes.double.st = { ...(Routes.double.st || {}), tab };
+    await App.route();
+  },
+  /* учебные анкеты пациентов: часть ждёт заполнения, часть уже заполнена */
+  async seedProms() {
+    if (!TRAIN || typeof Proms !== 'object') return;
+    if ((await DB.all('proms')).length) return;
+    const regs = (await Data.registries()).filter(r => (r.instruments || []).length);
+    for (const reg of regs) {
+      const people = (await Data.patients(reg.id)).filter(p => p.vital !== 'умер').slice(0, 16);
+      for (const p of people) { try { await Proms.autoSchedule(p, reg); } catch (error) { } }
+      let list = (await DB.all('proms')).filter(x => x.registryId === reg.id);
+      if (!list.length) {
+        for (const [i, p] of people.slice(0, 10).entries()) {
+          const ins = reg.instruments[i % reg.instruments.length];
+          await DB.put('proms', { patientId: p.id, registryId: reg.id, instrumentId: ins.id, instrumentName: ins.name, scheduleKey: 'manual:' + uid(), due: addDays(today(), (i % 4) * 4) }, 'учебная анкета');
+        }
+        list = (await DB.all('proms')).filter(x => x.registryId === reg.id);
+      }
+      for (const [i, pr] of list.entries()) {
+        if (i % 2) continue;
+        const ins = reg.instruments.find(x => x.id === pr.instrumentId); if (!ins) continue;
+        const answers = {}; (ins.items || []).forEach(it => { const o = it.options[Math.floor(Math.random() * it.options.length)]; if (o) answers[it.key] = Number(o.s); });
+        const r = scoreInstrument(ins, answers);
+        await DB.put('proms', { ...pr, answers, score: r.score, band: r.band, doneAt: nowISO(), mode: 'пациентом в клинике', synthetic: true }, 'учебная анкета заполнена');
+      }
+    }
+    if (this.routeName() === 'proms') await App.route();
+  },
+  /* учебная статистика точности ИИ: что ИИ предложил и что осталось после проверки врачом */
+  async seedAIQuality() {
+    if (!TRAIN) return;
+    const regs = await Data.registries();
+    const reg = regs.find(r => r.id === 'training-example') || regs[0];
+    if (!reg) return;
+    const events = (await Data.events(reg.id)).filter(e => e.status !== 'черновик');
+    if (events.some(e => e.aiReview)) return;
+    let n = 0;
+    for (const e of events.slice(0, 24)) {
+      const et = etById(reg, e.type); if (!et) continue;
+      const fields = formFields(et).filter(f => ['number', 'select', 'text', 'date'].includes(f.type) && e.data?.[f.key] != null && e.data[f.key] !== '' && typeof e.data[f.key] !== 'object').slice(0, 5);
+      if (!fields.length) continue;
+      const review = {};
+      fields.forEach((f, k) => {
+        const final = e.data[f.key];
+        const miss = (n + k) % 6 === 0;
+        const ai = !miss ? final : f.type === 'number' ? Number(final) + 1 : f.type === 'date' ? addDays(final, 1) : 'нет в документе';
+        review[f.key] = { ai, final, ok: !miss };
+      });
+      n++;
+      await DB.put('events', { ...e, aiReview: review }, 'учебный пример точности ИИ');
+    }
+    if (this.routeName() === 'aiquality') await App.route();
   },
   closeActs() {
     for (const w of (this.actWraps || []).reverse()) if (w.isConnected) { const x = w.querySelector('.modal-x'); if (x) x.click(); else w.remove(); }
@@ -353,7 +469,16 @@ const TrainingGuide = {
     }
     if (step.t && step.opt && !(await this.findLater(step.t))) { this.show(index + dir, dir); return; }
     if (step.t) await this.findLater(step.t, 4);
+    await this.drawer(step);
     this.draw(true);
+  },
+  /* узкий экран: меню спрятано за кнопкой ☰. Для шагов про меню гайд сам выдвигает его и потом убирает */
+  async drawer(step) {
+    if (typeof SB !== 'object' || !document.body.classList.contains('aa-sb') || !matchMedia('(max-width:900px)').matches) return;
+    const node = step.t ? this.find(step.t) : null;
+    const inMenu = !!node?.closest('.sb');
+    if (inMenu && !document.body.classList.contains('sb-open')) { SB.mobile(true); this.menuOpened = true; await new Promise(r => setTimeout(r, 330)); }
+    else if (!inMenu && this.menuOpened) { SB.mobile(false); this.menuOpened = false; }
   },
   skipChapter(step, dir) {
     let i = this.index;
@@ -419,7 +544,12 @@ const TrainingGuide = {
     if (back) back.onclick = () => this.back();
     document.body.classList.toggle('tr-reveal', !away && !!step.reveal);
     this.target = !away && step.t ? this.find(step.t) : null;
-    if (this.target && focus) this.reveal(this.target);
+    if (this.target && focus) {
+      this.reveal(this.target);
+      /* таблицы оборачиваются в прокручиваемый блок чуть позже отрисовки: повторяем прокрутку к цели */
+      const target = this.target;
+      setTimeout(() => { if (this.running && this.target === target && target.isConnected) { this.reveal(target); this.position(); } }, 450);
+    }
     this.shownAt = performance.now();
     this.position();
     this.track();
@@ -439,12 +569,32 @@ const TrainingGuide = {
     if (box && box !== document.body && box !== document.documentElement) {
       const area = box.getBoundingClientRect();
       const top = Math.max(area.top, 0), bottom = Math.min(area.bottom, innerHeight);
+      const room = bottom - top;
+      const callout = $('.training-callout', this.root)?.offsetHeight || 240;
       const visible = rect.top >= top + 8 && rect.bottom <= bottom - 8;
-      if (!visible) {
-        const tall = rect.height > (bottom - top) * 0.6;
-        const shift = tall ? rect.top - top - 12 : rect.top - top - ((bottom - top) - rect.height) / 2;
+      /* выноска должна поместиться сверху или снизу от цели, иначе она закроет то, о чём речь */
+      const free = Math.max(rect.top - top, bottom - rect.bottom);
+      const narrow = innerWidth < 640 || innerWidth - rect.right < 380 && rect.left < 380;
+      const fits = !narrow || free >= callout + 24;
+      if (!visible || !fits) {
+        const tall = rect.height > room * 0.6;
+        /* цель и выноска помещаются вместе: цель к верху, выноска под ней; иначе цель по центру или к верху, если она высокая */
+        const together = rect.height + callout + 40 <= room;
+        const shift = tall || (narrow && together) ? rect.top - top - 12 : rect.top - top - (room - rect.height) / 2;
         box.scrollTop += shift;
       }
+    }
+    /* цель за краем горизонтально прокручиваемой таблицы: прокручиваем таблицу вбок */
+    let wide = node.parentElement;
+    while (wide && wide !== document.body) {
+      const style = getComputedStyle(wide);
+      if (/(auto|scroll)/.test(style.overflowX) && wide.scrollWidth > wide.clientWidth + 1) break;
+      wide = wide.parentElement;
+    }
+    if (wide && wide !== document.body) {
+      const r = node.getBoundingClientRect(), a = wide.getBoundingClientRect();
+      if (r.right > a.right - 8) wide.scrollLeft += r.right - a.right + 16;
+      else if (r.left < a.left + 8) wide.scrollLeft -= a.left - r.left + 16;
     }
     this.pinPage();
   },
@@ -470,7 +620,7 @@ const TrainingGuide = {
       if (key !== last) {
         last = key;
         /* в первые секунды после шага цель возвращается в поле зрения, если её сдвинула подгрузка */
-        if (r && performance.now() - (this.shownAt || 0) < 2500 && (r.bottom < 40 || r.top > innerHeight - 40)) this.reveal(this.target);
+        if (r && performance.now() - (this.shownAt || 0) < 2500 && (r.bottom < 40 || r.top > innerHeight - 40 || r.left > innerWidth - 20 || r.right < 20 || (r.width < innerWidth && r.right > innerWidth + 2))) this.reveal(this.target);
         this.position();
       }
       requestAnimationFrame(tick);
@@ -523,7 +673,9 @@ const TrainingGuide = {
       } else if (vis.top >= height + gap + boundary) {
         side = 'bottom'; left = halfX - width / 2; top = vis.top - height - gap;
       } else {
-        left = innerWidth - width - boundary; top = innerHeight - height - boundary;
+        /* места нет ни с одной стороны: выноска у того края экрана, где цели меньше */
+        left = innerWidth - width - boundary;
+        top = vis.top > innerHeight - vis.bottom ? boundary : innerHeight - height - boundary;
       }
       left = clamp(left, boundary, innerWidth - width - boundary);
       top = clamp(top, boundary, innerHeight - height - boundary);
