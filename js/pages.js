@@ -58,6 +58,19 @@ function emptyState(text, btn) { return `<div class="empty"><p>${text}</p>${btn 
 
 /* просроченные наблюдения */
 function overdueFollowups(reg, patients, events) {
+  /* если в регистре заданы ожидаемые формы, просрочка считается так же, как в очереди наблюдения:
+     по задачам FollowQ, чтобы цифры на главной, в «Моих задачах» и в очереди совпадали */
+  if (typeof FollowQ === 'object' && typeof Episodes === 'object' && Episodes.expected(reg).length) {
+    const pts = patients.filter(p => p.registryId === reg.id);
+    const byId = new Map(pts.map(p => [p.id, p]));
+    const own = events.filter(e => e.registryId === reg.id && byId.has(e.patientId));
+    const lastBy = new Map();
+    own.forEach(e => { if (e.date && e.date > (lastBy.get(e.patientId) || '')) lastBy.set(e.patientId, e.date); });
+    return FollowQ.build(reg, own, pts, FollowQ.cache || [])
+      .filter(x => x.state === 'overdue' && byId.has(x.ep.patientId))
+      .map(x => ({ p: byId.get(x.ep.patientId), last: lastBy.get(x.ep.patientId) || x.ep.date, due: x.due, overdue: x.late || daysBetween(x.due, today()), what: x.et?.name || '' }))
+      .sort((a, b) => b.overdue - a.overdue);
+  }
   const every = Number(reg.followupEvery || 0); if (!every) return [];
   const out = [];
   patients.filter(p => p.registryId === reg.id).forEach(p => {
@@ -109,7 +122,7 @@ Routes.home = async (main) => {
     <div class="kpis">
       <a class="kpi" href="#patients"><span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.8c2 .7 3.2 2.5 3.5 5.2"/></svg></span><b>${patients.length}</b><span>пациентов в регистрах · ${events.length} событий</span></a>
       <a class="kpi" href="#patients"><span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/><rect x="3" y="3" width="18" height="18" rx="4"/></svg></span><b>${addedWeek.length}</b><span>записей внесено за 7 дней${addedWeek.length ? ` · ${addedWeek.filter(e => e.createdBy === Auth.user.id).length} мной` : ''}</span></a>
-      <a class="kpi ${overdue.length ? 'warn' : ''}" href="#me"><span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg></span><b>${overdue.length}</b><span>наблюдений просрочено</span></a>
+      <a class="kpi ${overdue.length ? 'warn' : ''}" href="${typeof Routes.followup === 'function' ? '#followup' : '#me'}"><span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg></span><b>${overdue.length}</b><span>наблюдений просрочено</span></a>
       ${hasProms ? `<a class="kpi ${promDue.length ? 'warn' : ''}" href="#proms"><span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/></svg></span><b>${promDue.length}</b><span>анкет к заполнению</span></a>` : ''}
       <a class="kpi ${qOpen ? 'due' : ''}" href="#queries"><span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></svg></span><b>${qOpen}</b><span>открытых запросов по данным</span></a>
       <a class="kpi" href="#quality"><span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.8 2.8L16.5 9.5"/></svg></span><b>${comp == null ? '0%' : comp + '%'}</b><span>полнота ключевых полей${comp == null ? ' (нет записей)' : ''}</span></a>
@@ -119,7 +132,7 @@ Routes.home = async (main) => {
       <div class="panel two"><div class="ph"><h2>Требует внимания</h2><button class="btn ai sm r" id="hBrief2">✦ Разбор ИИ</button></div>
         <div class="cols" style="grid-template-columns:${hasProms || M_('mdt') ? '1fr 1fr' : '1fr'}">
           <div>
-            <h4>Просроченные наблюдения</h4>${overdue.slice(0, 5).map(o => `<a class="bi" href="#patient/${o.p.id}"><span class="pod due">+${o.overdue}<i>дн</i></span><span class="bi-t"><b>${esc(pname(o.p))}</b><span>${esc(o.reg.name)} · последний контакт ${fmtDate(o.last)}</span></span></a>`).join('') || '<div class="bnone">Нет</div>'}</div>
+            <h4>Просроченные наблюдения</h4>${overdue.slice(0, 5).map(o => `<a class="bi" href="#patient/${o.p.id}"><span class="pod due">+${o.overdue}<i>дн</i></span><span class="bi-t"><b>${esc(pname(o.p))}</b><span>${esc(o.reg.name)}${o.what ? ' · ' + esc(o.what) + ', срок ' + fmtDate(o.due) : ' · последний контакт ' + fmtDate(o.last)}</span></span></a>`).join('') || '<div class="bnone">Нет</div>'}</div>
           ${hasProms || M_('mdt') ? `<div>${hasProms ? `<h4>Анкеты к заполнению</h4>${promDue.slice(0, 5).map(x => { const p = patients.find(y => y.id === x.patientId); return `<a class="bi" href="#patient/${x.patientId}"><span class="pod warn">✎</span><span class="bi-t"><b>${esc(p ? pname(p) : '?')}</b><span>${esc(x.instrumentName)} · срок ${fmtDate(x.due)}</span></span></a>`; }).join('') || '<div class="bnone">Нет</div>'}` : ''}
             ${M_('mdt') ? `<h4>МДК</h4>${mdt.filter(m => m.date >= today()).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3).map(m => `<a class="bi" href="#mdt/${m.id}"><span class="pod">${new Date(m.date).getDate()}<i>${new Date(m.date).toLocaleDateString('ru-RU', { month: 'short' })}</i></span><span class="bi-t"><b>${esc(m.title || 'МДК')}</b><span>${(m.cases || []).length} пациентов в повестке</span></span></a>`).join('') || '<div class="bnone">Не запланировано</div>'}` : ''}</div>` : ''}
         </div><div id="briefOut"></div></div>
