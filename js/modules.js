@@ -486,7 +486,9 @@ Routes.report = async (main, regId = '') => {
   const ds = await loadReg(reg0.id); const reg = ds.reg;
   const startEt = reg.keyDates?.start || reg.eventTypes[0].id;
   const years = [...new Set(ds.events.map(e => (e.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
-  const st = Routes.report.st || (Routes.report.st = { year: years[0] || String(new Date().getFullYear()), fields: null });
+  /* по умолчанию последний год, в котором есть события точки отсчёта (обычно операции), а не только наблюдения */
+  const startYears = [...new Set(ds.events.filter(e => e.type === startEt).map(e => (e.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
+  const st = Routes.report.st || (Routes.report.st = { year: startYears[0] || years[0] || String(new Date().getFullYear()), fields: null });
   const cand = reg.eventTypes.flatMap(et => formFields(et).filter(f => ['select', 'yesno', 'user', 'calc', 'multiselect'].includes(f.type) && f.type !== 'complist').map(f => ({ id: et.id + '.' + f.key, et, f })));
   if (!st.fields) st.fields = cand.filter(c => c.et.id === startEt && c.f.type !== 'user').slice(0, 6).map(c => c.id);
   main.innerHTML = `<div class="head noprint"><h1>Годовой отчёт</h1><div class="row">${regSelect(regs, reg.id, 'regSel', false)}<select class="inp" id="rYear">${(years.length ? years : [st.year]).map(y => `<option ${y === st.year ? 'selected' : ''}>${y}</option>`).join('')}<option value="all" ${st.year === 'all' ? 'selected' : ''}>за всё время</option></select><button class="btn" id="rFields">Разделы</button><button class="btn primary" onclick="window.print()">Печать / PDF</button></div></div><div id="rep" class="report"></div>`;
