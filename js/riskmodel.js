@@ -131,8 +131,9 @@ const RiskModel = {
     }
     return rows;
   },
+  hasValue(v) { return !isEmpty(v) && v !== 'неизвестно'; },
   encodeOutcome(v, events) {
-    if (isEmpty(v)) return null;
+    if (!RiskModel.hasValue(v)) return null;
     const list = Array.isArray(v) ? v.map(String) : [String(v)];
     return list.some(x => events.includes(x)) ? 1 : 0;
   },
@@ -140,13 +141,13 @@ const RiskModel = {
   design(rows, fields) {
     const terms = [];
     for (const f of fields) {
-      if (f.type === 'yesno') terms.push({ f, label: f.label + ': да', get: v => isEmpty(v) ? null : v === 'да' ? 1 : 0, expr: k => `(${k} === 'да' ? 1 : 0)` });
+      if (f.type === 'yesno') terms.push({ f, label: f.label + ': да', get: v => v === 'да' ? 1 : v === 'нет' ? 0 : null, expr: k => `(${k} === 'да' ? 1 : 0)` });
       else if (f.type === 'select') {
-        const cnt = {}; rows.forEach(r => { const v = r.vals[f.key]; if (!isEmpty(v)) cnt[v] = (cnt[v] || 0) + 1; });
+        const cnt = {}; rows.forEach(r => { const v = r.vals[f.key]; if (RiskModel.hasValue(v)) cnt[v] = (cnt[v] || 0) + 1; });
         const levels = Object.entries(cnt).sort((a, b) => b[1] - a[1]).map(x => x[0]);
         if (levels.length < 2) continue;
         f._ref = levels[0];
-        for (const lv of levels.slice(1, 7)) terms.push({ f, label: `${f.label}: ${lv} (против «${levels[0]}»)`, get: v => isEmpty(v) ? null : String(v) === lv ? 1 : 0, expr: k => `(${k} === ${JSON.stringify(lv)} ? 1 : 0)` });
+        for (const lv of levels.slice(1, 7)) terms.push({ f, label: `${f.label}: ${lv} (против «${levels[0]}»)`, get: v => !RiskModel.hasValue(v) ? null : String(v) === lv ? 1 : 0, expr: k => `(${k} === ${JSON.stringify(lv)} ? 1 : 0)` });
       } else terms.push({ f, label: f.label + (f.unit ? `, ${f.unit}` : ''), get: v => { if (isEmpty(v)) return null; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null; }, expr: k => k });
     }
     return terms;
@@ -196,6 +197,10 @@ Routes.riskmodel = async (main, regId = '') => {
   if ($('#rmOut', main)) $('#rmOut', main).onchange = e => { cfg.outKey = e.target.value; cfg.events = []; re(); };
   $('#rmMode', main).onchange = e => { cfg.mode = e.target.value; re(); };
   if ($('#rmRisk', main)) $('#rmRisk', main).onchange = e => { cfg.risk = e.target.value; };
+  for (const [selector, key] of [['#rmPreds', 'preds'], ['#rmEvents', 'events']]) {
+    const group = $(selector, main);
+    if (group) group.onchange = () => { cfg[key] = $$('input:checked', group).map(input => input.value); };
+  }
   $('#rmRun', main).onclick = async () => {
     cfg.events = $$('#rmEvents input:checked', main).map(x => x.value);
     if (cfg.mode === 'fit') cfg.preds = $$('#rmPreds input:checked', main).map(x => x.value);
@@ -205,9 +210,11 @@ Routes.riskmodel = async (main, regId = '') => {
     if (cfg.mode === 'fit' && !cfg.preds.length) return toast('Выберите хотя бы один предиктор', 'err');
     if (cfg.mode === 'check' && !cfg.risk) return toast('Выберите поле с прогнозом', 'err');
     box.innerHTML = '<p class="muted">Считаю…</p>';
+    const selection = { ...cfg };
     await new Promise(r => setTimeout(r, 30));
-    const rows = await RiskModel.rows(reg, cfg);
-    box.innerHTML = cfg.mode === 'fit' ? RiskModel.reportFit(reg, cfg, rows) : RiskModel.reportCheck(reg, cfg, rows);
+    const rows = await RiskModel.rows(reg, selection);
+    if (!box.isConnected) return;
+    box.innerHTML = selection.mode === 'fit' ? RiskModel.reportFit(reg, selection, rows) : RiskModel.reportCheck(reg, selection, rows);
     const copy = $('#rmCopy', box);
     if (copy) copy.onclick = () => { try { navigator.clipboard.writeText($('#rmFormula', box).textContent); toast('Формула скопирована'); } catch (e) { toast('Скопируйте формулу вручную', 'err'); } };
   };
@@ -239,7 +246,7 @@ RiskModel.reportFit = (reg, cfg, rows) => {
   const coef = [`<tr><td>Свободный член</td><td>${RiskModel.f(m.b[0], 3)}</td><td></td><td></td><td></td></tr>`,
     ...terms.map((t, j) => { const b = m.b[j + 1], se = m.se[j + 1]; return `<tr><td>${esc(t.label)}</td><td>${RiskModel.f(b, 3)}</td><td>${RiskModel.f(Math.exp(b), 2)}</td><td>${se == null ? '' : RiskModel.f(Math.exp(b - z * se), 2) + '-' + RiskModel.f(Math.exp(b + z * se), 2)}</td><td>${se ? RiskModel.pf(RiskModel.pval(b / se)) : ''}</td></tr>`; })].join('');
   const keys = [...new Set(terms.map(t => t.f.key))];
-  const formula = `(${keys.map(k2 => `${k2} == null || ${k2} === ''`).join(' || ')}) ? null : Math.round(1000 / (1 + Math.exp(-(${RiskModel.num(m.b[0])}${terms.map((t, j) => ` + ${RiskModel.num(m.b[j + 1])} * ${t.expr(t.f.key)}`).join('')}))) ) / 10`;
+  const formula = `(${keys.map(k2 => `${k2} == null || ${k2} === '' || ${k2} === 'неизвестно'`).join(' || ')}) ? null : Math.round(1000 / (1 + Math.exp(-(${RiskModel.num(m.b[0])}${terms.map((t, j) => ` + ${RiskModel.num(m.b[j + 1])} * ${t.expr(t.f.key)}`).join('')}))) ) / 10`;
   return head + `
     ${epv < 10 ? `<p class="warnt">Событий на один параметр: ${RiskModel.f(epv, 1)}. Это меньше 10: модель может быть переобучена, коэффициенты неустойчивы (Peduzzi и соавт., 1996). Уменьшите число предикторов или накопите данные.</p>` : `<p class="okt">Событий на один параметр: ${RiskModel.f(epv, 1)}.</p>`}
     ${m.separated ? '<p class="warnt">Модель не сошлась или есть почти полное разделение (какой-то предиктор почти идеально предсказывает исход). Коэффициенты ненадёжны.</p>' : ''}
@@ -294,12 +301,34 @@ NAV_ICONS.riskmodel = NAV_ICONS.riskmodel || NAV_ICONS.analytics || NAV_ICONS.me
     return groups;
   };
 }
+/* учебный режим: гайд сам выбирает исход и предикторы, чтобы показать готовый результат */
+RiskModel.trainingDemo = async () => {
+  if (!TRAIN || !Routes.riskmodel.st) return;
+  const regId = decodeURIComponent(location.hash.split('/')[1] || '');
+  const regs = await Data.registries();
+  const reg = regs.find(r => r.id === regId) || regs[0];
+  const cfg = reg && Routes.riskmodel.st[reg.id];
+  if (!cfg) return;
+  const base = etById(reg, cfg.base);
+  const outs = formFields(base || {}).filter(f => f.type === 'yesno');
+  const out = [/повторн.*операц|reop|релап/i, /несостоятельн|leak/i, /летальн|смерт|mort/i].map(rx => outs.find(f => rx.test(f.label + ' ' + f.key))).find(Boolean) || outs[0];
+  if (!out) return;
+  const skip = /летальн|смерт|повторн|осложн|койко|clavien|cci|несостоятельн|исход|mort|reop/i;
+  const pool = RiskModel.candidates(reg, base).filter(f => f.key !== out.key && !skip.test(f.label + ' ' + f.key));
+  /* числовые и «да/нет» предикторы дают по одному коэффициенту: на учебной выборке так модель читается проще */
+  const simple = f => ['number', 'calc', 'yesno'].includes(f.type) || (f.type === 'select' && (f.options || []).length <= 2);
+  const preds = [...pool.filter(simple), ...pool.filter(f => !simple(f))].slice(0, 2).map(f => f.key);
+  Object.assign(cfg, { outForm: cfg.base, outKey: out.key, events: ['да'], mode: 'fit', preds });
+  await App.route();
+  await TrainingGuide.until(() => $('#rmRun'));
+  $('#rmRun')?.click();
+};
 if (typeof TRAINING_CHAPTERS !== 'undefined' && typeof TrainingGuide === 'object') {
   const end = TRAINING_CHAPTERS.findIndex(c => c.id === 'end');
   TRAINING_CHAPTERS.splice(end < 0 ? TRAINING_CHAPTERS.length : end, 0,
     { id: 'riskmodel', name: 'Модель риска', page: 'riskmodel', go: 'riskmodel', steps: [
       { t: '#rmSetup', title: 'Модель риска', text: 'Выберите, что считается одним случаем (обычно операция), где записан исход и что считать событием. «Построить свою модель» подбирает логистическую регрессию по выбранным предикторам. «Проверить готовую модель» показывает, насколько формула вроде P-POSSUM точна на ваших пациентах.' },
-      { t: '#rmOutBox', title: 'Результат', text: 'C-статистика показывает, различает ли модель пациентов с исходом и без. Калибровка показывает, совпадает ли прогноз с тем, что произошло: O/E, наклон и таблица по группам. Поправка на оптимизм бутстрепом показывает, какой точности ждать на новых пациентах. Если событий на один предиктор меньше 10, модель ненадёжна.' }
+      { t: '#rmOutBox', act: async () => { await RiskModel.trainingDemo(); await TrainingGuide.until(() => $('#rmOutBox') && $('#rmOutBox').textContent.length > 120, 8000); }, title: 'Результат', text: 'Гайд выбрал исход «повторная операция», два предиктора и нажал «Рассчитать». В учебной базе мало пациентов, поэтому модель помечена как ненадёжная: на реальных данных нужно больше событий. C-статистика показывает, различает ли модель пациентов с исходом и без. Калибровка показывает, совпадает ли прогноз с тем, что произошло: O/E, наклон и таблица по группам. Поправка на оптимизм бутстрепом показывает, какой точности ждать на новых пациентах. Если событий на один предиктор меньше 10, модель ненадёжна.' }
     ] });
   TrainingGuide.steps = TRAINING_CHAPTERS.flatMap((chapter, c) => chapter.steps.map((step, i) => ({ ...step, chapter, c, i })));
 }
