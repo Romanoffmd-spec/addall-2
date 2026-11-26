@@ -287,6 +287,9 @@ async function setTraining(on) {
     if (!on) localStorage.removeItem('addall2.trainPass');
     localStorage.setItem('addall2.mode', on ? 'train' : 'live');
     sessionStorage.removeItem('addall2_uid');
+    /* сразу после загрузки страницы браузер иногда не успевает записать режим до перезагрузки: даём ему время */
+    await new Promise(r => setTimeout(r, 80));
+    if (localStorage.getItem('addall2.mode') !== (on ? 'train' : 'live')) localStorage.setItem('addall2.mode', on ? 'train' : 'live');
     location.hash = '';
     location.reload();
   } catch (error) { toast(error.message, 'err'); }
