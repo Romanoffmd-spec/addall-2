@@ -157,7 +157,8 @@ const AIDemo = {
   },
   brief(prompt) {
     let ctx = {}; try { ctx = JSON.parse(prompt.slice(prompt.indexOf('{', prompt.indexOf('JSON')))); } catch (e) { }
-    return [`• Просроченных форм наблюдения: ${(ctx.overdue_followups || []).length}.`, `• Анкет пациентов к отправке: ${ctx.proms_due ?? 0}.`, `• Открытых запросов по данным: ${ctx.open_queries ?? 0}.`, '• (Брифинг демонстрационного ИИ учебного режима.)'].join('\n');
+    const ai = ctx.ai_overnight;
+    return [...(ai && (ai.forms_added || ai.waiting_review || ai.documents_for_manual_review) ? [`• ИИ за сутки: новых пациентов ${ai.new_patients}, дополнено карточек ${ai.cards_updated}, форм ${ai.forms_added}. Проверьте ${ai.waiting_review} карточек в разделе «ИИ за сутки»${ai.documents_for_manual_review ? `, ещё ${ai.documents_for_manual_review} документов ждут ручного разбора` : ''}.`] : []), `• Просроченных форм наблюдения: ${(ctx.overdue_followups || []).length}.`, `• Анкет пациентов к отправке: ${ctx.proms_due ?? 0}.`, `• Открытых запросов по данным: ${ctx.open_queries ?? 0}.`, '• (Брифинг демонстрационного ИИ учебного режима.)'].join('\n');
   },
   answer(prompt, doc) {
     if (/Ответь JSON: \{"ok": true\}/.test(prompt)) return '{"ok": true}';
