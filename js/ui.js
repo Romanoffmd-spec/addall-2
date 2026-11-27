@@ -292,7 +292,7 @@ const NavInd = {
 
 /* ---------- 7. Страница входа: левая колонка с позиционированием платформы ---------- */
 const UI_AUTH_SIDE = () => `<aside class="auth-side">
-  <span class="as-k"><img src="media/addall-icon.svg" alt="">AddAll · ${esc(Settings.data.center || 'платформа регистров')}</span>
+  <span class="as-k"><img class="aa-mark" data-dark="1" alt="">AddAll · ${esc(Settings.data.center || 'платформа регистров')}</span>
   <h1>Честные данные<br>о <span>результатах лечения</span></h1>
   <p>Платформа клинических регистров: внесите пациента по событиям, наблюдайте исходы и сравнивайте свои результаты с регистром с поправкой на риск.</p>
   <ul>
@@ -521,3 +521,70 @@ if (typeof EN === 'object') Object.assign(EN, {
   new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(run); } }).observe(document.documentElement, { childList: true, subtree: true });
   if (document.body) run(); else document.addEventListener('DOMContentLoaded', run);
 })();
+
+/* ---------- логотип пользователя без фона, светлый и тёмный (27.11.2026) ----------
+   Готовые PNG лежат в media (addall-logo-t, addall-logo-dark-t, addall-mark, addall-mark-dark).
+   Если их нет (например, на сайте), фон вырезается на лету из рисунка внутри media/addall-logo.svg и addall-logo-dark.svg. */
+const Brand = {
+  src: { logo: ['media/addall-logo-t.png', 'media/addall-logo-dark-t.png'], mark: ['media/addall-mark.png', 'media/addall-mark-dark.png'] },
+  cache: {},
+  missing: false,
+  dark() { return document.documentElement.getAttribute('data-theme') === 'dark'; },
+  cut(kind, dark) {
+    const key = kind + (dark ? 1 : 0);
+    if (this.cache[key]) return this.cache[key];
+    return this.cache[key] = new Promise(async ok => {
+      /* исходник: PNG внутри media/addall-logo(-dark).svg; берём его как data:, чтобы холст не считался чужим */
+      let source = null;
+      try { const svg = await (await fetch(dark ? 'media/addall-logo-dark.svg' : 'media/addall-logo.svg')).text(); source = (svg.match(/href="(data:image\/png;base64,[^"]+)"/) || [])[1] || null; } catch (e) { }
+      if (!source) return ok(dark ? 'media/addall-logo-dark.svg' : 'media/addall-logo.svg');
+      const im = new Image();
+      im.onload = () => {
+        try {
+          const c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+          const x = c.getContext('2d'); x.drawImage(im, 0, 0);
+          const d = x.getImageData(0, 0, c.width, c.height), p = d.data, bg = dark ? [11, 11, 15] : [255, 255, 255], W = c.width;
+          let x0 = W, y0 = c.height, x1 = 0, y1 = 0;
+          for (let i = 0; i < p.length; i += 4) {
+            const m = Math.max(Math.abs(p[i] - bg[0]), Math.abs(p[i + 1] - bg[1]), Math.abs(p[i + 2] - bg[2]));
+            const a = Math.min(1, Math.max(0, (m - 6) / 50));
+            if (a > 0) for (let k = 0; k < 3; k++) p[i + k] = Math.max(0, Math.min(255, (p[i + k] - bg[k] * (1 - a)) / a));
+            p[i + 3] = Math.round(a * 255);
+            if (a > 0.15) { const px = (i >> 2) % W, py = ((i >> 2) / W) | 0; if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py; }
+          }
+          x.putImageData(d, 0, 0);
+          let bottom = y1;
+          if (kind === 'mark') {
+            for (let y = y0 + Math.round((y1 - y0) * 0.6); y <= y1; y++) {
+              let any = false;
+              for (let xx = x0; xx <= x1 && !any; xx++) any = p[(y * W + xx) * 4 + 3] > 40;
+              if (!any) { bottom = y - 1; break; }
+            }
+          }
+          const w = x1 - x0 + 1, h = bottom - y0 + 1, o = document.createElement('canvas'), ox = o.getContext('2d');
+          if (kind === 'mark') { const s = 160 / Math.max(w, h); o.width = o.height = 160; ox.drawImage(c, x0, y0, w, h, (160 - w * s) / 2, (160 - h * s) / 2, w * s, h * s); }
+          else { o.width = 560; o.height = Math.round(h * 560 / w); ox.drawImage(c, x0, y0, w, h, 0, 0, o.width, o.height); }
+          ok(o.toDataURL('image/png'));
+        } catch (e) { ok(dark ? 'media/addall-logo-dark.svg' : 'media/addall-logo.svg'); }
+      };
+      im.onerror = () => ok(null);
+      im.src = source;
+    });
+  },
+  apply() {
+    const dark = this.dark();
+    document.querySelectorAll('img.aa-logo, img.aa-mark').forEach(img => {
+      const kind = img.classList.contains('aa-logo') ? 'logo' : 'mark', want = img.dataset.dark === '1' || dark;
+      if (img.dataset.bs === String(want)) return;
+      img.dataset.bs = String(want);
+      const fallback = async () => { img.onerror = null; this.missing = true; const u = await this.cut(kind, want); if (u && img.dataset.bs === String(want)) img.src = u; };
+      if (this.missing) fallback(); else { img.onerror = fallback; img.src = this.src[kind][want ? 1 : 0]; }
+    });
+  }
+};
+{
+  let queued = false;
+  const run = () => { if (queued) return; queued = true; queueMicrotask(() => { queued = false; Brand.apply(); }); };
+  new MutationObserver(run).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'], childList: true, subtree: true });
+  run();
+}
