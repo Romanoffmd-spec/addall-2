@@ -31,16 +31,8 @@ const Pages = {
     $('#s_restore').onclick = () => IO.restorePicker();
     if ($('#s_train')) $('#s_train').onclick = () => setTraining(true);
   },
-  login() {
-    document.body.className = '';
-    document.body.innerHTML = `<div class="auth"><div class="auth-box">
-      <div class="auth-brand"><img src="media/addall-emblem.svg" alt=""><b>Add<i>All</i> 2.0</b></div><p class="muted">${esc(Settings.data.center || '')} ${esc(Settings.data.department || '')}</p>
-      <div class="fld"><label class="flab">Логин</label><input class="inp" id="l_login" autofocus></div>
-      <div class="fld"><label class="flab">Пароль</label><input class="inp" type="password" id="l_pass"></div>
-      <button class="btn primary block" id="l_go">Войти</button></div></div>`;
-    const go_ = async () => { if (await Auth.login($('#l_login').value, $('#l_pass').value)) App.boot(); else toast('Неверный логин или пароль', 'err'); };
-    $('#l_go').onclick = go_; $('#l_pass').onkeydown = e => { if (e.key === 'Enter') go_(); };
-  }
+  /* страница входа: Pages.login задаётся в signup.js */
+  login() { }
 };
 
 /* ---------- общие помощники ---------- */
@@ -148,8 +140,8 @@ Routes.home = async (main) => {
   const brief = async () => {
     if (!AI.ready()) return toast('ИИ не настроен: «Администрирование» → «Пользователи и настройки»', 'err');
     $('#briefOut').innerHTML = '<p class="muted">ИИ готовит брифинг…</p>';
-    const ctx = { date: today(), operations_today_tomorrow: events.filter(e => isSurg(e) && e.date >= today() && e.date <= addDays(today(), 1)).length, overdue_followups: overdue.slice(0, 20).map(o => ({ patient: pname(o.p), registry: o.reg.name, days: o.overdue })), proms_due: promDue.length, open_queries: qOpen, completeness: comp, indicators: qreg ? qreg.indicators.map(i => ({ name: i.name, ...evalIndicator(i, events.filter(e => e.registryId === qreg.id), patients, qreg), target: i.target })) : [], mdt_upcoming: mdt.filter(m => m.date >= today()).length };
-    try { const t = await AI.call(`Ты помощник заведующего хирургическим отделением. По данным JSON составь короткий брифинг на сегодня по-русски: 4-7 пунктов, что важно сделать, на что обратить внимание. Без вступлений, без длинных тире.\n${JSON.stringify(ctx)}`, { text: '' }); $('#briefOut').innerHTML = `<div class="card" style="margin-top:12px;white-space:pre-wrap">${esc(t)}</div>`; }
+    const ctx = { date: today(), ai_overnight: typeof AIDigest === 'object' ? AIDigest.brief() : null, operations_today_tomorrow: events.filter(e => isSurg(e) && e.date >= today() && e.date <= addDays(today(), 1)).length, overdue_followups: overdue.slice(0, 20).map(o => ({ patient: pname(o.p), registry: o.reg.name, days: o.overdue })), proms_due: promDue.length, open_queries: qOpen, completeness: comp, indicators: qreg ? qreg.indicators.map(i => ({ name: i.name, ...evalIndicator(i, events.filter(e => e.registryId === qreg.id), patients, qreg), target: i.target })) : [], mdt_upcoming: mdt.filter(m => m.date >= today()).length };
+    try { const t = await AI.call(`Ты помощник заведующего хирургическим отделением. По данным JSON составь короткий брифинг на сегодня по-русски: 4-7 пунктов, что важно сделать, на что обратить внимание. Если в ai_overnight есть добавленные формы или документы для ручного разбора, первым пунктом напиши, что ИИ добавил за сутки из хранилища документов и сколько карточек ждёт проверки. Без вступлений, без длинных тире.\n${JSON.stringify(ctx)}`, { text: '' }); $('#briefOut').innerHTML = `<div class="card" style="margin-top:12px;white-space:pre-wrap">${esc(t)}</div>`; }
     catch (e) { $('#briefOut').innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
   };
   $('#hBrief').onclick = brief; $('#hBrief2').onclick = brief;
@@ -713,6 +705,7 @@ async function eventDialog(p, reg, ev) {
       <input class="inp" id="evExternal" maxlength="120" value="${esc(ev.externalEncounterId || '')}" ${ro ? 'disabled' : ''}>
       <span class="fhint">Номер госпитализации, приёма или вмешательства из журнала или папки с документами.</span></div>` : ''}
     ${ev.out30Due ? `<div class="fld"><label for="evOut30Checked" class="flab">Дата проверки исхода 30 дней</label><input class="inp" type="date" id="evOut30Checked" min="${esc(ev.out30Due)}" max="${today()}" value="${esc(ev.out30CheckedOn || '')}" ${ro ? 'disabled' : ''}><span class="fhint">Укажите дату, когда проверено, что исход известен как минимум до ${fmtDate(ev.out30Due)}.</span></div>` : ''}
+    ${ev.aiAuto && ev.aiReview === 'ожидает' ? `<div class="miss" id="evAiNote">✦ Форму заполнил ИИ из документа «${esc(ev.intakeFile || 'документ')}». Сверьте значения по цитатам и сохраните: отметка «ждёт проверки» снимется.</div>` : ''}
     ${ev.locked ? '<div class="miss">Событие заблокировано после проверки. Изменения возможны только после разблокировки руководителем (с указанием причины).</div>' : ''}
     ${ev.followDue ? `<div class="fhint" id="evFollow" style="margin:4px 0 8px">Запись для срока наблюдения ${fmtDate(ev.followDue)}. Дата должна быть не раньше ${fmtDate(addDays(ev.followDue, -((Episodes.rule(et) || {}).early || 0)))}: оценка раньше срока за этот срок не засчитывается.</div>` : ''}
     <div id="evEp"></div><div id="evForm"></div><details class="card" id="evAiEvidence" hidden><summary>Цитаты из документа</summary><div id="evAiQuotes"></div></details><div id="evQA"></div>
@@ -808,6 +801,8 @@ async function eventDialog(p, reg, ev) {
     const epSel = $('#evEpisode', m);
     if (epSel) { if (epSel.value) record.anchorEventId = epSel.value; else delete record.anchorEventId; }
     const obj = { ...record, patientId: p.id, registryId: reg.id, type: et.id, date, data, status: draft ? 'черновик' : 'завершено', schemaVersion: archived?.version || reg.version };
+    /* черновик, заполненный ИИ из хранилища: сохранение врачом означает, что он его проверил */
+    if (obj.aiAuto && obj.aiReview === 'ожидает') Object.assign(obj, { aiReview: 'проверено', aiReviewedBy: Auth.user.id, aiReviewedAt: nowISO() });
     if (!draft && reg.crossChecks?.length) {
       const violations = ClinicalRules.violations(reg, p, obj, await Data.events(reg.id));
       if (violations.length) {
