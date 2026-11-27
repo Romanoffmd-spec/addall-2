@@ -425,7 +425,7 @@ const App = {
     document.body.className = 'shell';
     document.body.innerHTML = `
       <header class="top2"><div class="t2-row">
-        <a class="t2-brand" href="#home"><img src="media/addall-icon.svg" alt=""><span class="wm">Add<i>All</i></span><span class="sub"><b>${esc(Settings.data.department || 'Платформа регистров')}</b><em>${esc(Settings.data.center || 'локальная версия')}</em></span></a>
+        <a class="t2-brand" href="#home"><img class="aa-mark" alt=""><span class="wm">Add<i>All</i></span><span class="sub"><b>${esc(Settings.data.department || 'Платформа регистров')}</b><em>${esc(Settings.data.center || 'локальная версия')}</em></span></a>
         <button class="cmdk" id="cmdk"><span>⌕ Поиск пациентов и разделов</span><kbd>Ctrl K</kbd></button>
         <div class="top-r">
           <button class="aipill ${AI.ready() ? 'on' : ''}" id="aiPill" title="Настройки ИИ"><span class="tgl"><i></i></span><span>ИИ ${AI.ready() ? (AI.cfg().provider === 'demo' ? 'демо' : AI.local() ? 'локально' : 'вкл.') : 'выкл.'}</span></button>
@@ -476,7 +476,7 @@ const App = {
     catch (e) { console.error(e); main.innerHTML = `<div class="card err" style="margin-top:20px"><b>Ошибка:</b> ${esc(e.message)}</div>`; }
     const h1 = $('.head h1', main), grp = ROUTE_GROUP[r];
     if (h1 && grp && !$('.kicker', main)) h1.insertAdjacentHTML('beforebegin', `<div class="kicker">${esc(grp)}</div>`);
-    if (!$('.foot', main)) main.insertAdjacentHTML('beforeend', `<div class="foot"><img src="media/addall-icon.svg" alt=""><b>AddAll 2.0</b><span>Внеси всё. Честные данные.</span><span class="r">${esc([Settings.data.department, Settings.data.center].filter(Boolean).join(' · ') || 'Локальная версия')}</span><img class="logo-ink" src="media/nroc-logo.png" alt=""></div>`);
+    if (!$('.foot', main)) main.insertAdjacentHTML('beforeend', `<div class="foot"><img class="aa-mark" alt=""><b>AddAll 2.0</b><span>Внеси всё. Честные данные.</span><span class="r">${esc([Settings.data.department, Settings.data.center].filter(Boolean).join(' · ') || 'Локальная версия')}</span><img class="logo-ink" src="media/nroc-logo.png" alt=""></div>`);
     main.scrollTop = 0;
     this.nav(); Bell.refresh();
   }
