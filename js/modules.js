@@ -31,7 +31,7 @@ Routes.analytics = async (main, regId = '') => {
   const reg0 = regs.find(r => r.id === regId) || regs[0];
   if (!reg0) { main.innerHTML = '<div class="head"><h1>Аналитика</h1></div>' + emptyState('Нет регистров.'); return; }
   const ds = await loadReg(reg0.id); const reg = ds.reg;
-  const saved = (await DB.all('saved')).filter(s => s.registryId === reg.id);
+  const saved = (await DB.all('saved')).filter(s => s.registryId === reg.id && !s.kind);
   const st = Routes.analytics.st && Routes.analytics.st.reg === reg.id ? Routes.analytics.st : (Routes.analytics.st = { reg: reg.id, type: 'dist', cohort: { conds: [], from: '', to: '' }, cfg: {} });
   const etOpts = (sel, withP = false) => `${withP ? `<option value="_p" ${sel === '_p' ? 'selected' : ''}>Карточка пациента</option>` : ''}${reg.eventTypes.map(e => `<option value="${e.id}" ${sel === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}`;
   const fOpts = (etId, sel, types) => fieldsOf(reg, etId).filter(f => !types || types.includes(f.type)).map(f => `<option value="${f.key}" ${sel === f.key ? 'selected' : ''}>${esc(f.label)}</option>`).join('');
@@ -74,12 +74,13 @@ Routes.analytics = async (main, regId = '') => {
     if (t === 'dist') h = `<label class="flab">Форма</label><select class="inp" data-k="et">${etOpts(c.et, true)}</select><label class="flab">Поле</label><select class="inp" data-k="field">${fOpts(c.et, c.field)}</select>`;
     if (t === 'cross') h = `<label class="flab">Форма</label><select class="inp" data-k="et">${etOpts(c.et)}</select><label class="flab">Строки</label><select class="inp" data-k="row">${fOpts(c.et, c.row, ['select', 'yesno', 'user', 'calc', 'text'])}</select><label class="flab">Столбцы</label><select class="inp" data-k="col"><option value="_sex">Пол пациента</option>${fOpts(c.et, c.col, ['select', 'yesno', 'user', 'calc', 'text'])}</select>`;
     if (t === 'run') h = `<label class="flab">Форма</label><select class="inp" data-k="et">${etOpts(c.et)}</select><label class="flab">Показывать</label><select class="inp" data-k="mode"><option value="n">число событий</option><option value="rate" ${c.mode === 'rate' ? 'selected' : ''}>долю исхода, %</option></select>${outcomeUI('o')}<label class="flab">Период</label><select class="inp" data-k="per"><option value="m">месяц</option><option value="q" ${c.per === 'q' ? 'selected' : ''}>квартал</option><option value="y" ${c.per === 'y' ? 'selected' : ''}>год</option></select>`;
-    if (t === 'km') h = `<label class="flab">Точка отсчёта</label><select class="inp" data-k="et">${etOpts(c.et)}</select><label class="flab">Конечная точка (дата события)</label><select class="inp" data-k="end">${dateFields.map(f => `<option value="${f.key}" ${c.end === f.key ? 'selected' : ''}>${esc(f.etName)} › ${esc(f.label)}</option>`).join('') || '<option value="">нет полей-дат</option>'}</select><label class="flab">Сравнить группы по</label><select class="inp" data-k="grp"><option value="">без групп</option><option value="_sex" ${c.grp === '_sex' ? 'selected' : ''}>Пол</option>${centers().length ? `<option value="_center" ${c.grp === '_center' ? 'selected' : ''}>Центр</option>` : ''}${fOpts(c.et, c.grp, ['select', 'yesno', 'user', 'calc'])}</select><div class="help">Цензурирование по дате последнего события пациента в регистре.</div>`;
+    if (t === 'km') h = `<label class="flab">Точка отсчёта</label><select class="inp" data-k="et">${etOpts(c.et)}</select><label class="flab">Конечная точка (дата события)</label><select class="inp" data-k="end">${typeof Survival === 'object' ? Survival.endOptions(dateFields, c.end) : dateFields.map(f => `<option value="${f.key}" ${c.end === f.key ? 'selected' : ''}>${esc(f.etName)} › ${esc(f.label)}</option>`).join('')}</select><label class="flab">Сравнить группы по</label><select class="inp" data-k="grp"><option value="">без групп</option><option value="_sex" ${c.grp === '_sex' ? 'selected' : ''}>Пол</option>${centers().length ? `<option value="_center" ${c.grp === '_center' ? 'selected' : ''}>Центр</option>` : ''}${fOpts(c.et, c.grp, ['select', 'yesno', 'user', 'calc'])}</select><div class="help">Цензурирование по дате последнего события пациента в регистре.</div>`;
     if (t === 'cusum') h = `<label class="flab">Форма</label><select class="inp" data-k="et">${etOpts(c.et)}</select>${outcomeUI('o')}<label class="flab">Ожидаемый риск (поле, % или 0–1)</label><select class="inp" data-k="risk"><option value="">нет: средняя частота когорты</option>${fOpts(c.et, c.risk, ['number', 'calc'])}</select><label class="flab">Хирург / группа</label><select class="inp" data-k="grp"><option value="">все вместе</option>${centers().length ? `<option value="_center" ${c.grp === '_center' ? 'selected' : ''}>Центр</option>` : ''}${fOpts(c.et, c.grp, ['user', 'select', 'text'])}</select><label class="flab">Значение группы</label><input class="inp" data-k="gval" value="${esc(c.gval || '')}" placeholder="пусто = все; для хирурга выберите после «Построить»"><div class="row"><div class="fld"><label class="flab">OR тревоги</label><input class="inp" type="number" step="0.1" data-k="or" value="${esc(c.or || 2)}"></div><div class="fld"><label class="flab">Порог h</label><input class="inp" type="number" step="0.1" data-k="h" value="${esc(c.h || 4.5)}"></div></div>`;
     if (t === 'funnel') h = `<label class="flab">Форма</label><select class="inp" data-k="et">${etOpts(c.et)}</select>${outcomeUI('o')}<label class="flab">Сравнивать по</label><select class="inp" data-k="grp">${centers().length ? `<option value="_center" ${c.grp === '_center' ? 'selected' : ''}>Центр</option>` : ''}${fOpts(c.et, c.grp, ['user', 'select', 'text'])}</select><label class="flab">Поправка на риск (поле ожидаемого риска)</label><select class="inp" data-k="risk"><option value="">без поправки</option>${fOpts(c.et, c.risk, ['number', 'calc'])}</select>`;
     if (['cusum', 'funnel'].includes(t)) h += riskUnits();
     if (t === 'ind') h = `<p class="muted">Все показатели качества регистра по годам точки отсчёта.</p>`;
     if (t === 'compare') h = `<label class="flab">Форма</label><select class="inp" data-k="et">${etOpts(c.et)}</select><label class="flab">Числовой показатель</label><select class="inp" data-k="num">${fOpts(c.et, c.num, ['number', 'calc'])}</select><label class="flab">Группы</label><select class="inp" data-k="grp"><option value="_sex" ${c.grp === '_sex' ? 'selected' : ''}>Пол</option>${centers().length ? `<option value="_center" ${c.grp === '_center' ? 'selected' : ''}>Центр</option>` : ''}${fOpts(c.et, c.grp, ['select', 'yesno', 'user', 'calc'])}</select><div class="help">2 группы: критерий Манна-Уитни, 3 и более: Краскела-Уоллиса с попарными сравнениями (поправка Холма).</div>`;
+    if (typeof Survival === 'object' && Survival.cfg[t]) h = Survival.cfg[t]({ c, reg, etOpts, fOpts, dateFields, ds });
     if (t !== 'ind') {
       const ff = fieldsOf(reg, c.et).filter(f => ['select', 'multiselect', 'yesno', 'user'].includes(f.type));
       if (c.efEt !== c.et) { c.efEt = c.et; c.efvals = []; const et = etById(reg, c.et); c.efkey = (ff.find(f => et && f.label.toLowerCase() === et.name.toLowerCase()) || ff.find(f => f.type === 'select') || {}).key || ''; }
@@ -88,6 +89,8 @@ Routes.analytics = async (main, regId = '') => {
       h += `<div class="efbox"><label class="flab">Отбор: какие события «${esc(etById(reg, c.et)?.name || 'пациенты')}» учитывать</label><div class="row"><select class="inp" data-k="efkey"><option value="">все без отбора</option>${ff.map(x => `<option value="${x.key}" ${c.efkey === x.key ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select>${c.efkey ? `<button class="btn sm" id="efPick">☰ ${c.efvals?.length ? 'выбрано ' + c.efvals.length : 'выбрать'}</button>` : ''}</div>${lbl.length ? `<div class="help"><b>${esc(lbl.join(', '))}</b></div>` : c.efkey ? '<div class="help">Сейчас учитываются все значения</div>' : ''}</div>`;
     }
     $('#aCfg').innerHTML = h;
+    const cov = $('#coxCov');
+    if (cov) cov.onchange = () => { c.cov = $$('input:checked', cov).map(x => x.value).join(','); $('#coxCovVal').value = c.cov; };
     const efb = $('#efPick'); if (efb) efb.onclick = async () => {
       const f = fieldsOf(reg, c.et).find(x => x.key === c.efkey); if (!f) return;
       const seen = c.et === '_p' ? ds.patients.map(p => f.key === 'sex' ? p.sex : p.data?.[f.key]) : rowsFor(ds, c.et).map(r => r.v[f.key]);
@@ -176,24 +179,32 @@ function runAnalysis(ds, st, out) {
     }
     if (st.type === 'km') {
       if (!c.end) throw new Error('Нет поля с датой конечной точки');
+      const keyOf = (p, start) => {
+        if (c.grp === '_sex') return p.sex || '?';
+        if (c.grp === '_center') return p.center || 'не указан';
+        if (c.grp) { const et = etById(reg, c.et); const v = computeValues(reg, p, et, start.data, start.date)[c.grp]; return isEmpty(v) ? 'не указано' : valStr(fld(c.et, c.grp), v, users); }
+        return 'Все';
+      };
+      const survRows = Survival.data(ds, reg, c, pts, efOK, keyOf);
       const groups = {};
-      ds.patients.filter(p => pts.has(p.id)).forEach(p => {
-        const pe = ds.events.filter(e => e.patientId === p.id);
-        const start = pe.filter(e => e.type === c.et && e.date && efOK(computeValues(reg, p, etById(reg, c.et), e.data, e.date)[c.efkey])).sort((a, b) => a.date.localeCompare(b.date))[0]; if (!start) return;
-        let endDate = null; pe.forEach(e => { const d = e.data?.[c.end]; if (d && (!endDate || d < endDate)) endDate = d; });
-        const last = pe.map(e => e.date).concat(pe.flatMap(e => Object.values(e.data || {}).filter(v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)))).sort().pop();
-        const t = endDate ? daysBetween(start.date, endDate) : daysBetween(start.date, last || start.date);
-        let gk = 'Все';
-        if (c.grp === '_sex') gk = p.sex || '?'; else if (c.grp === '_center') gk = p.center || 'не указан'; else if (c.grp) { const et = etById(reg, c.et); const v = computeValues(reg, p, et, start.data, start.date)[c.grp]; gk = isEmpty(v) ? 'не указано' : valStr(fld(c.et, c.grp), v, users); }
-        (groups[gk] = groups[gk] || []).push({ t: Math.max(0, t) / 30.4375, e: endDate ? 1 : 0 });
-      });
+      survRows.forEach(r => (groups[r.group] = groups[r.group] || []).push(r));
       const names = Object.keys(groups).sort(); if (!names.length) throw new Error('Нет пациентов с точкой отсчёта');
       const kms = names.map(n => ({ n, km: Stats.km(groups[n]) }));
       const lr = names.length > 1 ? Stats.logrank(names.map(n => groups[n])) : null;
       const maxT = Math.max(...kms.map(k => k.km.maxT));
       const svg = Chart.line('Каплан-Майер', kms.map((k, i) => ({ n: names.length > 1 ? `${k.n} (n=${k.km.n})` : '', step: true, pts: k.km.pts.map(p => ({ x: p.t, y: p.s * 100 })), extendTo: k.km.maxT, ticks: k.km.censored.map(x => ({ x: x.t, y: x.s * 100 })), c: PAL[i] })), { step: true, xl: 'Месяцы', yl: '%', ymin: 0, ymax: 100, xmin: 0, xmax: maxT || 1 });
       const at = (km, m) => { if (m > km.maxT) return 'нет наблюдения'; const c = Stats.kmCI(km, m); return QI.n1(c.s * 100) + '%' + (c.lo != null ? `<div class="muted small">ДИ ${QI.n1(c.lo * 100)}-${QI.n1(c.hi * 100)}</div>` : ''); };
-      h = chartBox('kaplan_meier', svg) + `<div class="card"><table class="tbl"><thead><tr><th>Группа</th><th>n</th><th>События</th><th>Медиана, мес</th><th>12 мес</th><th>36 мес</th><th>60 мес</th></tr></thead><tbody>${kms.map(k => `<tr><td><b>${esc(k.n)}</b></td><td>${k.km.n}</td><td>${k.km.events}</td><td>${k.km.median == null ? 'не достигнута' : Math.round(k.km.median * 10) / 10}</td><td>${at(k.km, 12)}</td><td>${at(k.km, 36)}</td><td>${at(k.km, 60)}</td></tr>`).join('')}</tbody></table>${lr ? `<p>Лог-ранговый критерий: χ² = <b>${lr.chi}</b>, df = ${lr.df}, p = <b>${Stats.pFmt(lr.p)}</b></p>` : ''}<p class="muted">Засечки на кривых: цензурированные наблюдения.</p></div>`;
+      /* предупреждения, чтобы не принять за выживаемость кривую, которая ею не является */
+      const kmWarn = [];
+      const endField = fld(c.et, c.end);
+      const totalN = kms.reduce((sum, k) => sum + k.km.n, 0), totalE = kms.reduce((sum, k) => sum + k.km.events, 0);
+      if (typeof TRAIN !== 'undefined' && TRAIN) kmWarn.push('Учебные данные вымышлены: кривая показывает, как работает метод, но клинического смысла не имеет.');
+      if (endField || /оконч|заверш|выписк|начал/i.test(reg.eventTypes.flatMap(e => formFields(e)).find(f => f.key === c.end)?.label || '')) kmWarn.push('Конечная точка похожа на дату этапа лечения, а не на исход: так получается длительность этапа, а не выживаемость. Для выживаемости выберите дату смерти, рецидива или прогрессии.');
+      if (totalN >= 10 && totalE / totalN > 0.9) kmWarn.push(`Событие наступило у ${totalE} из ${totalN}: проверьте, что выбранная дата действительно означает исход.`);
+      if (maxT < 12) kmWarn.push('Самое долгое наблюдение короче 12 месяцев: выживаемость на 12, 36 и 60 месяцах оценить нельзя.');
+      const lostWarn = Survival.lostText(survRows); if (lostWarn) kmWarn.push(lostWarn);
+      if (totalN < 30) kmWarn.push(`В анализе ${totalN} ${totalN === 1 ? 'пациент' : 'пациентов'}: доверительные интервалы будут широкими.`);
+      h = (kmWarn.length ? `<div class="card warnt" id="kmWarn">${kmWarn.map(w => '<p>' + esc(w) + '</p>').join('')}</div>` : '') + chartBox('kaplan_meier', svg) + `<div class="card"><table class="tbl"><thead><tr><th>Группа</th><th>n</th><th>События</th><th>Медиана, мес</th><th>12 мес</th><th>36 мес</th><th>60 мес</th></tr></thead><tbody>${kms.map(k => `<tr><td><b>${esc(k.n)}</b></td><td>${k.km.n}</td><td>${k.km.events}</td><td>${(() => { const m = Stats.kmMedian(k.km); return Survival.months(m.median) + (m.median != null ? `<div class="muted small">ДИ ${Survival.months(m.lo)}-${m.hi == null ? 'не достигнута' : Survival.months(m.hi)}</div>` : ''); })()}</td><td>${at(k.km, 12)}</td><td>${at(k.km, 36)}</td><td>${at(k.km, 60)}</td></tr>`).join('')}</tbody></table>${Survival.riskTable(names.map(n => ({ name: n, rows: groups[n] })))}${lr ? `<p>Лог-ранговый критерий: χ² = <b>${lr.chi}</b>, df = ${lr.df}, p = <b>${Stats.pFmt(lr.p)}</b></p>` : ''}<p class="muted">Засечки на кривых: цензурированные наблюдения. Время считается от точки отсчёта каждого пациента. 95% ДИ по Гринвуду в log-log преобразовании, ДИ медианы по Brookmeyer-Crowley. Пациенты без события цензурируются на дату последней записи в регистре.</p></div>`;
     }
     if (st.type === 'cusum') {
       const o = outc('o'); if (!o.key) throw new Error('Задайте исход');
@@ -273,6 +284,7 @@ function runAnalysis(ds, st, out) {
         return `<tr><td><b>${esc(i.name)}</b><div class="muted small">${esc(QI.tgtTxt(i))}</div></td>${cells.join('')}${QI.cell(reg, i, x, allEv, ds.patients)}</tr>`;
       }).join('') || '<tr><td class="muted">Показатели не настроены</td></tr>'}</tbody></table><p class="muted">Год считается по дате самого события. ДИ: 95% интервал Уилсона. Нажмите на процент, чтобы увидеть пациентов.</p></div>`;
     }
+    if (typeof Survival === 'object' && Survival.run[st.type]) h = Survival.run[st.type]({ ds, reg, c, pts, fld, efOK, users });
   } catch (e) { h = `<div class="card err">${esc(e.message)}</div>`; }
   out.innerHTML = cohTxt + h;
 }
