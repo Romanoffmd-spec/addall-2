@@ -20,15 +20,15 @@ const AIDigest = {
     const R = new Map(regs.map(r => [r.id, r]));
     const auto = events.filter(e => e.aiAuto && P.has(e.patientId));
     const fresh = auto.filter(e => (e.aiAutoAt || '') >= since);
-    const waiting = auto.filter(e => e.aiReview === 'ожидает');
+    const waiting = auto.filter(e => e.aiCheck === 'ожидает');
     const cards = new Map();
     for (const e of [...fresh, ...waiting]) {
       const p = P.get(e.patientId), reg = R.get(e.registryId);
       if (!reg) continue;
       const card = cards.get(p.id) || { p, reg, isNew: !!p.aiCreated && (p.aiAutoAt || '') >= since, forms: [], files: new Set(), waiting: 0, fresh: false };
       if (!card.forms.some(f => f.e.id === e.id)) {
-        card.forms.push({ e, name: etById(reg, e.type)?.name || e.type, fields: (e.aiFields || Object.keys(e.aiEvidence || {})).length, review: e.aiReview === 'ожидает' });
-        if (e.aiReview === 'ожидает') card.waiting++;
+        card.forms.push({ e, name: etById(reg, e.type)?.name || e.type, fields: (e.aiFields || Object.keys(e.aiEvidence || {})).length, review: e.aiCheck === 'ожидает' });
+        if (e.aiCheck === 'ожидает') card.waiting++;
         if ((e.aiAutoAt || '') >= since) card.fresh = true;
       }
       if (e.intakeFile) card.files.add(e.intakeFile);
@@ -153,9 +153,9 @@ if (typeof SimpleNav === 'object' && !SimpleNav.WORK.includes('aidigest')) Simpl
     await patient(main, id, ...rest);
     const p = await DB.get('patients', id);
     if (!p) return;
-    const events = (await Data.events(p.registryId)).filter(e => e.patientId === id && e.aiAuto && e.aiReview === 'ожидает');
+    const events = (await Data.events(p.registryId)).filter(e => e.patientId === id && e.aiAuto && e.aiCheck === 'ожидает');
     if (location.hash !== hash || $('#aidReview', main)) return;
-    const created = p.aiCreated && p.aiReview === 'ожидает';
+    const created = p.aiCreated && p.aiCheck === 'ожидает';
     if (!events.length && !created) return;
     const reg = await DB.get('registries', p.registryId);
     if (location.hash !== hash || $('#aidReview', main)) return;
@@ -171,7 +171,7 @@ if (typeof SimpleNav === 'object' && !SimpleNav.WORK.includes('aidigest')) Simpl
     const ok = $('#aidPatientOk', box);
     if (ok) ok.onclick = async () => {
       const fresh = await DB.get('patients', id);
-      await DB.put('patients', { ...fresh, aiReview: 'проверено', aiReviewedBy: Auth.user.id, aiReviewedAt: nowISO() }, 'карточка, созданная ИИ, проверена');
+      await DB.put('patients', { ...fresh, aiCheck: 'проверено', aiCheckedBy: Auth.user.id, aiCheckedAt: nowISO() }, 'карточка, созданная ИИ, проверена');
       toast('Отмечено: карточка проверена');
       App.route();
     };
