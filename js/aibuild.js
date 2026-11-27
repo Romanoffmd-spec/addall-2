@@ -207,7 +207,7 @@ Routes.aiquality = async (main, regId = '') => {
   const regs = (await Data.registries()).filter(r => !r.archivedAt);
   if (!regs.length) { main.innerHTML = '<div class="head"><h1>Точность автозаполнения</h1></div><p>Нет доступных регистров.</p>'; return; }
   const reg = regs.find(r => r.id === regId) || regs[0];
-  const events = (await Data.events(reg.id)).filter(e => e.aiReview);
+  const events = (await Data.events(reg.id)).filter(e => e.aiReview && typeof e.aiReview === 'object');
   const stats = new Map();
   for (const e of events) {
     const et = etById(reg, e.type);
