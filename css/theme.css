@@ -649,3 +649,10 @@ main .head .btn{white-space:normal;max-width:100%;text-align:center}
 @media (max-width:700px){.aid-row{grid-template-columns:1fr}.aid-row .btn{justify-self:start}}
 /* колонки сетки не шире экрана: широкие таблицы прокручиваются внутри своего блока */
 .cols>*{min-width:0}
+
+/* логотип пользователя без белой плашки: светлый и тёмный варианты (27.11.2026) */
+.auth-brand.auth-logo{justify-content:center;margin:0 0 12px}
+.auth-brand.auth-logo img.aa-logo{height:auto;width:min(200px,62%);border-radius:0}
+.auth-box.wide .auth-brand.auth-logo img.aa-logo{width:170px}
+.auth-brand.auth-logo+p.muted{text-align:center}
+.t2-brand img.aa-mark,.hero-k img,.as-k img,.foot img.aa-mark{border-radius:0}
