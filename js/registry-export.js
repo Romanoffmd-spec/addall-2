@@ -3,7 +3,7 @@
 
 const RegistryExport = {
   tables: {
-    participants: ['participant_id', 'sex', 'local_id', 'name', 'birth_date', 'phone', 'email', 'iin', 'center'],
+    participants: ['participant_id', 'sex', 'age_years', 'death_day', 'local_id', 'name', 'birth_date', 'death_date', 'phone', 'email', 'iin', 'center'],
     episodes: ['episode_id', 'participant_id', 'event_id', 'date', 'day', 'center'],
     events: ['event_id', 'participant_id', 'episode_id', 'form', 'date', 'day', 'status', 'schema_version', 'revision', 'verified', 'file_evidence_count'],
     values: ['record_table', 'record_id', 'participant_id', 'form', 'schema_version', 'group', 'field', 'type',
@@ -15,6 +15,7 @@ const RegistryExport = {
     quality_measures: ['schema_version', 'indicator', 'name', 'type', 'form', 'definition']
   },
   safeField(field) {
+    if (field.safeText && !field.sensitive && field.type === 'text') return true;
     return !field.sensitive && ['number', 'integer', 'calc', 'yesno', 'select', 'multiselect', 'icd10', 'icdo', 'date', 'datetime', 'time', 'group'].includes(field.type);
   },
   sanitized(field, value, base, clinical) {
@@ -32,6 +33,8 @@ const RegistryExport = {
       return base && day ? daysBetween(base, day) : null;
     }
     if (field.type === 'time') return null;
+    /* код без персональных данных (номер образца, ячейка хранения): отмечен в словаре safeText */
+    if (field.safeText && field.type === 'text') return String(value).slice(0, 80);
     return null;
   },
 
@@ -152,8 +155,13 @@ const RegistryExport = {
     const version = reg.version || 1;
     for (const id of participants) {
       const patient = identities.get(id), participant_id = participantIds.get(id);
-      rows.participants.push({ participant_id, sex: patient.sex,
-        ...(clinical ? { local_id: patient.localId, name: pname(patient), birth_date: patient.birthDate, phone: patient.phone, email: patient.email,
+      /* возраст на дату начала наблюдения (в обезличенном виде не больше 90, как в HIPAA Safe Harbor) и день смерти от начала */
+      const anchor = dateBase.get(id) || today();
+      const age = calendarDay(String(patient.birthDate || '')) ? Math.floor(daysBetween(patient.birthDate, anchor) / 365.25) : null;
+      const death = calendarDay(String(patient.deathDate || '').slice(0, 10)) ? String(patient.deathDate).slice(0, 10) : '';
+      rows.participants.push({ participant_id, sex: patient.sex, age_years: age == null || age < 0 ? '' : clinical ? age : Math.min(age, 90),
+        death_day: death ? relative(id, death) ?? '' : '',
+        ...(clinical ? { local_id: patient.localId, name: pname(patient), birth_date: patient.birthDate, death_date: death, phone: patient.phone, email: patient.email,
           iin: patient.iin, center: patient.center } : {}) });
       values(reg.patientFields, patient.data || {}, { patientId: id, record_table: 'participants', record_id: participant_id, form: '_participant', schema_version: version });
     }
@@ -250,10 +258,19 @@ Routes['registry-export'] = async (main, regId = '') => {
       <div class="row"><button class="btn" data-bx="spss">SPSS</button><button class="btn" data-bx="stata">Stata</button><button class="btn" data-bx="r">R</button><button class="btn" data-bx="sas">SAS</button></div>
       <h3>Другие регистры и международные стандарты</h3>
       <div class="row"><button class="btn" data-bx="redcap">REDCap (словарь и данные)</button><button class="btn" data-bx="odm">CDISC ODM 1.3 (структура и данные)</button><a class="btn" href="#interop">HL7 FHIR R4</a></div>
+      <h3>Для партнёров: научные центры, лаборатории, Минздрав, международные регистры</h3>
+      <div class="row"><button class="btn" data-bx="omop" title="OMOP CDM 5.4: person, observation_period, visit_occurrence, condition_occurrence, procedure_occurrence, measurement, observation, death">OMOP CDM</button>
+      <button class="btn" data-bx="sdtm" title="CDISC SDTM: DM, SV, MH, PR, AE и находки в домене XF, с описанием переменных">CDISC SDTM</button>
+      <button class="btn" data-bx="aggregate" title="Только числа по группам: маленькие группы скрываются">Агрегированная (с порогом)</button>
+      <button class="btn" data-bx="manifest" title="Список образцов из формы «Биообразец» для лаборатории">Манифест биообразцов</button></div>
+      <div class="row"><div class="fld"><label for="bxMin">Порог малых групп для агрегированной выгрузки</label><input class="inp" type="number" min="2" max="50" id="bxMin" value="5"></div></div>
+      <p class="muted small">Агрегированная выгрузка содержит только счёт по группам и медианы: группы меньше порога показаны как «&lt;порог», а соседние ячейки скрываются так, чтобы скрытое число нельзя было вычислить из итогов.</p>
       <p id="bxSummary" role="status"></p></section>`;
   let chosenFields = null;
   const readField = id => $('#' + id, main);
-  const reset = () => { chosenFields = null; readField('bxFieldNote').textContent = 'Все разрешённые поля'; };
+  const reset = () => { chosenFields = null; main.bxFields = null; readField('bxFieldNote').textContent = 'Все разрешённые поля'; };
+  /* шаблоны получателей (exportplus.js) задают выбор полей через эту функцию */
+  main.bxSetFields = list => { chosenFields = list && list.length ? [...list] : null; main.bxFields = chosenFields; readField('bxFieldNote').textContent = chosenFields ? 'Выбрано полей: ' + chosenFields.length : 'Все разрешённые поля'; };
   readField('bxReg').onchange = reset;
   readField('bxPrivacy').onchange = reset;
   readField('bxChooseFields').onclick = async () => {
@@ -284,7 +301,7 @@ Routes['registry-export'] = async (main, regId = '') => {
     };
     $('#bxFieldsAll', box).onclick = () => { reset(); box.close(); };
     $('#bxFieldsSave', box).onclick = () => {
-      chosenFields = [...selection];
+      chosenFields = [...selection]; main.bxFields = chosenFields;
       readField('bxFieldNote').textContent = 'Выбрано полей: ' + chosenFields.length;
       box.close();
     };
@@ -293,13 +310,16 @@ Routes['registry-export'] = async (main, regId = '') => {
   $$('[data-bx]', main).forEach(button => button.onclick = async () => {
     const from = $('#bxFrom', main).value, to = $('#bxTo', main).value;
     if (from && to && from > to) return toast('Дата начала позже даты окончания', 'err');
-    const identified = can('users') && $('#bxPrivacy', main).value === 'clinical';
-    if (identified && !await confirmBox('В комплект войдут идентификаторы пациентов. Подтвердите выгрузку для внутренней работы.')) return;
+    /* агрегированная выгрузка считает по полным данным внутри браузера, наружу уходят только числа */
+    const aggregate = button.dataset.bx === 'aggregate';
+    const identified = aggregate || can('users') && $('#bxPrivacy', main).value === 'clinical';
+    if (identified && !aggregate && !await confirmBox('В комплект войдут идентификаторы пациентов. Подтвердите выгрузку для внутренней работы.')) return;
     button.disabled = true;
     try {
       const [ds, proms] = await Promise.all([loadReg($('#bxReg', main).value), DB.all('proms')]);
       const bundle = RegistryExport.assemble(ds, proms, { from, to, center: $('#bxCenter', main).value, drafts: $('#bxDrafts', main).checked, stablePid: $('#bxPid', main).checked, identified, fields: chosenFields });
-      await Audit.log('выгрузка комплекта ' + button.dataset.bx + (identified ? ' (с идентификаторами)' : ''), 'registries', ds.reg.id, null, null);
+      if (aggregate) bundle.minCell = Math.max(2, Number($('#bxMin', main)?.value) || 5);
+      await Audit.log('выгрузка комплекта ' + button.dataset.bx + (aggregate ? ' (только агрегированные числа, порог ' + bundle.minCell + ')' : identified ? ' (с идентификаторами)' : ''), 'registries', ds.reg.id, null, null);
       RegistryExport.downloadBundle(bundle, button.dataset.bx, slug(ds.reg.name) + '_registry_' + today());
       $('#bxSummary', main).textContent = 'Пациентов ' + bundle.tables.participants.length + ', событий ' + bundle.tables.events.length + ', анкет ' + bundle.tables.questionnaires.length;
     } catch (error) { toast(error.message, 'err'); }
