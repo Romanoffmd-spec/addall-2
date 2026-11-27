@@ -705,7 +705,7 @@ async function eventDialog(p, reg, ev) {
       <input class="inp" id="evExternal" maxlength="120" value="${esc(ev.externalEncounterId || '')}" ${ro ? 'disabled' : ''}>
       <span class="fhint">Номер госпитализации, приёма или вмешательства из журнала или папки с документами.</span></div>` : ''}
     ${ev.out30Due ? `<div class="fld"><label for="evOut30Checked" class="flab">Дата проверки исхода 30 дней</label><input class="inp" type="date" id="evOut30Checked" min="${esc(ev.out30Due)}" max="${today()}" value="${esc(ev.out30CheckedOn || '')}" ${ro ? 'disabled' : ''}><span class="fhint">Укажите дату, когда проверено, что исход известен как минимум до ${fmtDate(ev.out30Due)}.</span></div>` : ''}
-    ${ev.aiAuto && ev.aiReview === 'ожидает' ? `<div class="miss" id="evAiNote">✦ Форму заполнил ИИ из документа «${esc(ev.intakeFile || 'документ')}». Сверьте значения по цитатам и сохраните: отметка «ждёт проверки» снимется.</div>` : ''}
+    ${ev.aiAuto && ev.aiCheck === 'ожидает' ? `<div class="miss" id="evAiNote">✦ Форму заполнил ИИ из документа «${esc(ev.intakeFile || 'документ')}». Сверьте значения по цитатам и сохраните: отметка «ждёт проверки» снимется.</div>` : ''}
     ${ev.locked ? '<div class="miss">Событие заблокировано после проверки. Изменения возможны только после разблокировки руководителем (с указанием причины).</div>' : ''}
     ${ev.followDue ? `<div class="fhint" id="evFollow" style="margin:4px 0 8px">Запись для срока наблюдения ${fmtDate(ev.followDue)}. Дата должна быть не раньше ${fmtDate(addDays(ev.followDue, -((Episodes.rule(et) || {}).early || 0)))}: оценка раньше срока за этот срок не засчитывается.</div>` : ''}
     <div id="evEp"></div><div id="evForm"></div><details class="card" id="evAiEvidence" hidden><summary>Цитаты из документа</summary><div id="evAiQuotes"></div></details><div id="evQA"></div>
@@ -802,7 +802,7 @@ async function eventDialog(p, reg, ev) {
     if (epSel) { if (epSel.value) record.anchorEventId = epSel.value; else delete record.anchorEventId; }
     const obj = { ...record, patientId: p.id, registryId: reg.id, type: et.id, date, data, status: draft ? 'черновик' : 'завершено', schemaVersion: archived?.version || reg.version };
     /* черновик, заполненный ИИ из хранилища: сохранение врачом означает, что он его проверил */
-    if (obj.aiAuto && obj.aiReview === 'ожидает') Object.assign(obj, { aiReview: 'проверено', aiReviewedBy: Auth.user.id, aiReviewedAt: nowISO() });
+    if (obj.aiAuto && obj.aiCheck === 'ожидает') Object.assign(obj, { aiCheck: 'проверено', aiCheckedBy: Auth.user.id, aiCheckedAt: nowISO() });
     if (!draft && reg.crossChecks?.length) {
       const violations = ClinicalRules.violations(reg, p, obj, await Data.events(reg.id));
       if (violations.length) {
