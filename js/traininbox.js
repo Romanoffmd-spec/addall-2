@@ -138,7 +138,7 @@ const TrainInbox = {
       const base = twin ? { lastName: twin.lastName, firstName: twin.firstName, middleName: twin.middleName || '', birthDate: twin.birthDate, sex: twin.sex }
         : { lastName: grab('Фамилия'), firstName: grab('Имя'), middleName: '', birthDate: calendarDay(birth) || '', sex: grab('Пол') };
       if (!base.lastName || !base.birthDate || !['М', 'Ж'].includes(base.sex)) return { ...item, autoNote: 'Для новой карточки в документе не найдены фамилия, дата рождения или пол' };
-      patient = await DB.put('patients', { registryId: reg.id, center: item.center, localId: number, ...base, createdBy: 'ai-intake', aiCreated: true, aiReview: 'ожидает',
+      patient = await DB.put('patients', { registryId: reg.id, center: item.center, localId: number, ...base, createdBy: 'ai-intake', aiCreated: true, aiCheck: 'ожидает',
         aiAutoAt: stamp, intakeId: item.id, intakeFile: item.filename, ...(twin?.pid ? { pid: twin.pid } : {}) }, 'карточка создана ИИ из документа');
       created = true;
     }
@@ -171,7 +171,7 @@ const TrainInbox = {
       const data = { ...(before?.data || {}) }; fresh.forEach(k => { data[k] = out[k]; });
       const dateEvidence = AI.fieldEvidence({ date }, { date: proposal.date_evidence }, source, item.document).date;
       const saved = await DB.put('events', { ...before, patientId: patient.id, registryId: reg.id, type: form.id, date: before?.date || date, data, status: 'черновик',
-        schemaVersion: reg.version, intakeId: item.id, intakeFile: item.filename, aiSource: true, aiAuto: true, aiAutoAt: stamp, aiReview: 'ожидает', aiFields: fresh,
+        schemaVersion: reg.version, intakeId: item.id, intakeFile: item.filename, aiSource: true, aiAuto: true, aiAutoAt: stamp, aiCheck: 'ожидает', aiFields: fresh,
         aiEvidence: { ...(before?.aiEvidence || {}), ...Object.fromEntries(fresh.map(k => [k, evidence[k]])) }, ...(dateEvidence ? { dateEvidence } : {}),
         ...(anchor ? { anchorEventId: anchor.id } : {}), createdBy: before?.createdBy || 'ai-intake' }, 'черновик заполнен ИИ из документа');
       made.push(saved); ids.push(saved.id);
