@@ -5,7 +5,7 @@ const Pages = {
   setup() {
     document.body.className = '';
     document.body.innerHTML = `<div class="auth"><div class="auth-box wide">
-      <div class="auth-brand"><img src="media/addall-emblem.svg" alt=""><b>Add<i>All</i> 2.0</b></div><p class="muted">Первый запуск. Создайте администратора платформы. ${typeof NET !== 'undefined' && NET.on ? 'Данные хранятся в общей базе на сервере.' : 'Данные хранятся только в этом браузере на этом компьютере.'}</p>
+      <div class="auth-brand auth-logo"><img class="aa-logo" alt="AddAll 2.0, Registry Platform"></div><p class="muted">Первый запуск. Создайте администратора платформы. ${typeof NET !== 'undefined' && NET.on ? 'Данные хранятся в общей базе на сервере.' : 'Данные хранятся только в этом браузере на этом компьютере.'}</p>
       <div class="grid">
         <div class="fld"><label class="flab">Учреждение</label><input class="inp" id="s_center" placeholder="Например: ННОЦ, Астана"></div>
         <div class="fld"><label class="flab">Отделение / сектор</label><input class="inp" id="s_dep"></div>
@@ -106,7 +106,7 @@ Routes.home = async (main) => {
   const qreg = regs.find(r => (r.indicators || []).length && events.some(e => e.registryId === r.id)) || regs.find(r => (r.indicators || []).length);
   main.innerHTML = `
     <section class="hero"><div class="hero-bg" style="background-image:url(media/nroc-hero-hd.webp)"></div><div class="hero-in">
-      <div class="hero-k"><img src="media/addall-icon.svg" alt=""><span>${esc(Settings.data.center || 'AddAll 2.0')}</span></div>
+      <div class="hero-k"><img class="aa-mark" data-dark="1" alt=""><span>${esc(Settings.data.center || 'AddAll 2.0')}</span></div>
       <h1>${hello}, ${esc(first)}</h1><p>${esc(Settings.data.department || 'Регистр результатов лечения')}: результаты лечения, наблюдение и качество в одном месте.</p>
       <span class="hero-date">${new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
       <div class="hero-act">${can('enter') ? '<button class="btn light" id="hNewP">+ Новый пациент</button><button class="btn glass" id="hNewAI">✦ Пациент из документа</button>' : ''}<button class="btn glass" id="hBrief">✦ Брифинг ИИ</button><a class="btn glass" href="#mdt">МДК</a><a class="btn glass" href="#trials">Исследования</a></div>
