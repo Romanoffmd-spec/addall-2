@@ -71,6 +71,8 @@ if (FIRE.on) {
       try { const d = await FIRE.col(store).doc(String(id)).get(); return d.exists ? FIRE.dec(d.data()) : undefined; } catch (e) { return undefined; }
     },
     async rawPut(store, obj) {
+      /* заявка на регистрацию до входа: учётная запись Firebase и запись в signups, участника создаёт администратор при подтверждении */
+      if (!FIRE.signedIn() && store === 'users' && FIRE.boot && obj && obj.status === 'pending' && lastPass && lastPass.salt === obj.salt) return FIRE.signup(obj, lastPass.pass);
       if (!FIRE.signedIn()) { FIRE.pending = FIRE.pending.filter(x => !(x.store === store && x.obj.id === obj.id)); FIRE.pending.push({ store, obj }); return; }
       const clean = FIRE.strip(store, obj);
       /* сотрудник (не администратор) пишет свою запись только со своей ролью из записи участника */
@@ -144,6 +146,8 @@ if (FIRE.on) {
     if (!(await _login(login, pass)) || !this.user || (mem.userId && this.user.id !== mem.userId)) { this.user = null; sessionStorage.removeItem('addall2_uid'); await FIRE.auth.signOut(); return false; }
     if (mem.role && ROLES[mem.role]) this.user.role = mem.role;
     if (mem.admin) FIRE.sync().catch(() => { });
+    if (mem.admin) FIRE.watchSignups();
+    setTimeout(() => FIRE.pushStats(), 4000);
     return true;
   };
   const _restore = Auth.restore.bind(Auth);
@@ -157,6 +161,8 @@ if (FIRE.on) {
     await _restore();
     if (this.user && mem.role && ROLES[mem.role]) this.user.role = mem.role;
     if (this.user && mem.admin) FIRE.sync().catch(() => { });
+    if (this.user && mem.admin) FIRE.watchSignups();
+    if (this.user) setTimeout(() => FIRE.pushStats(), 4000);
   };
   /* проверка своего пароля (смена пароля и подтверждения) через Firebase, без хэша в базе */
   checkOwnPass = async (u, pass) => { try { const cu = FIRE.auth.currentUser; await cu.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(cu.email, pass)); return true; } catch (e) { return false; } };
@@ -177,6 +183,75 @@ if (FIRE.on) {
       if (x.id !== Auth.user?.id) { try { await DB.rawPut('users', x); } catch (e) { } }
     }
   };
+  /* заявка на регистрацию (до входа) */
+  FIRE.signup = async function (obj, pass) {
+    let cr;
+    try { cr = await FIRE.auth.createUserWithEmailAndPassword(FIRE.email(obj.login), pass); }
+    catch (e) {
+      const c = e.code || '';
+      if (/email-already-in-use/.test(c)) throw new Error('Такой логин уже зарегистрирован. Если это вы, войдите или нажмите «Забыли пароль?»');
+      if (/invalid-email/.test(c)) throw new Error('Логин: латинские буквы, цифры, точка или дефис, либо рабочая почта');
+      if (/weak-password/.test(c)) throw new Error('Пароль слабый: минимум 8 символов, буквы и цифры');
+      if (/operation-not-allowed/.test(c)) throw new Error('Вход по паролю не включён в проекте Firebase (Authentication, Sign-in method, Email/Password)');
+      throw new Error('Не удалось отправить заявку: ' + (e.message || c));
+    }
+    const clean = FIRE.strip('users', { ...obj, fireUid: cr.user.uid, applicationNumber: 'R-' + cr.user.uid.slice(0, 6).toUpperCase() });
+    try {
+      await FIRE.fs.doc('signups/' + cr.user.uid).set({ v: JSON.stringify(clean), at: new Date().toISOString(), login: String(obj.login), name: String(obj.name || '') });
+    } catch (e) {
+      try { await cr.user.delete(); } catch (x) { }
+      throw new Error('Регистрация на сайте ещё не включена: администратору нужно опубликовать правила базы (firestore.rules). Пока учётную запись может создать администратор.');
+    }
+    try { await FIRE.auth.signOut(); } catch (e) { }
+    return clean;
+  };
+  /* открытые счётчики для страницы входа */
+  FIRE.stats = async function () {
+    try { const d = await FIRE.fs.doc('meta/stats').get(); return d.exists ? d.data() : {}; } catch (e) { return {}; }
+  };
+  FIRE.pushStats = async function () {
+    if (!FIRE.signedIn() || !FIRE.mem || !FIRE.mem.active) return;
+    try {
+      const users = (await DB.all('users')).filter(u => u && u.id !== '_boot' && u.active !== false && !['pending', 'rejected'].includes(u.status)).length;
+      const patients = FIRE.mem.role && ['authority', 'sponsor', 'itadmin'].includes(FIRE.mem.role) ? null : (await DB.all('patients')).length;
+      const data = { users, at: new Date().toISOString() };
+      if (patients != null) data.patients = patients;
+      if (FIRE.mem.admin) {
+        data.selfReg = Settings.data.selfReg !== false;
+        /* справочники для формы регистрации: учреждения с отделениями и должности (без пациентов и без настроек безопасности) */
+        data.orgs = (typeof orgs === 'function' ? orgs() : []).map(o => ({ name: String(o.name || ''), on: o.on !== false, depts: (o.depts || []).map(d => ({ name: String(d.name || ''), on: d.on !== false })) }));
+        data.positions = (Settings.data.positions || []).map(x => ({ name: String(x.name || ''), on: x.on !== false }));
+      }
+      await FIRE.fs.doc('meta/stats').set(data, { merge: true });
+    } catch (e) { }
+  };
+  /* администратор: заявки из signups переносятся в обычный список пользователей со статусом «ожидает» */
+  FIRE.watchSignups = function () {
+    if (FIRE.unsub.signups || !FIRE.mem || !FIRE.mem.admin) return;
+    FIRE.unsub.signups = FIRE.fs.collection('signups').onSnapshot(async snap => {
+      let added = 0;
+      const docs = snap.docs || snap.docChanges().filter(ch => ch.type !== 'removed').map(ch => ch.doc);
+      for (const d of docs) {
+        let o = null; try { o = JSON.parse(d.data().v); } catch (e) { }
+        if (!o) continue;
+        const all = await DB.all('users');
+        if (!all.some(x => x.fireUid === d.id || (x.login || '').toLowerCase() === String(o.login || '').toLowerCase())) {
+          o.fireUid = d.id; o.status = 'pending'; o.active = false;
+          try {
+            await DB.rawPut('users', o);
+            await DB.rawPut('audit', { id: uid('au_'), ts: nowISO(), user: o.id, userName: o.name, action: 'регистрация (заявка)', store: 'users', recId: o.id });
+            added++;
+          } catch (e) { continue; }
+        }
+        try { await FIRE.fs.collection('signups').doc(d.id).delete(); } catch (e) { }
+      }
+      if (added) {
+        toast('Новая заявка на доступ: ' + added);
+        if (/^#admin(\/|$)/.test(location.hash)) App.route();
+        if (typeof Bell === 'object' && Bell.refresh) Bell.refresh();
+      }
+    }, () => { });
+  };
   Auth.logout = async function () {
     if (this.user) { try { await DB.rawPut('audit', { id: uid('au_'), ts: nowISO(), user: this.user.id, userName: this.user.name, action: 'выход', store: 'users', recId: this.user.id }); } catch (e) { } }
     FIRE.stop(); try { await FIRE.auth.signOut(); } catch (e) { }
@@ -188,7 +263,7 @@ if (FIRE.on) {
   Pages.setup = function () {
     const r = _psetup.apply(this, arguments);
     const fix = () => {
-      document.querySelectorAll('.auth p.muted').forEach(p => { if (p.textContent.includes('только в этом браузере')) p.textContent = 'Первый запуск онлайн-версии. Создайте администратора платформы. Данные хранятся в Firebase (проект addall-2), доступ только у пользователей, которых заведёт администратор. Только тестовые данные, без реальных пациентов.'; });
+      document.querySelectorAll('.auth p.muted').forEach(p => { if (p.textContent.includes('только в этом браузере')) p.textContent = 'Первый запуск онлайн-версии. Создайте администратора платформы. Данные хранятся в Firebase (проект addall-2), доступ только у сотрудников, которых завёл или подтвердил администратор. Только тестовые данные, без реальных пациентов.'; });
       const sr = document.getElementById('s_restore'); if (sr) sr.style.display = 'none';
       document.querySelectorAll('.auth label').forEach(l => { if (/регистрироваться самим/.test(l.textContent)) l.style.display = 'none'; });
     };
@@ -198,9 +273,25 @@ if (FIRE.on) {
 
   /* на странице входа: без самостоятельной регистрации (учётные записи создаёт администратор), сброс пароля письмом */
   const _plogin = Pages.login;
-  Pages.login = async function (mode = 'login') {
-    Settings.data.selfReg = false; if (mode === 'reg') mode = 'login';
-    const r = await _plogin.call(this, mode);
+  Pages.login = async function (mode = 'login', ...args) {
+    /* до входа настройки закрыты; открытые счётчики и признак саморегистрации лежат в meta/stats */
+    const stats = await FIRE.stats();
+    Settings.data.selfReg = stats.selfReg !== false;
+    if (!FIRE.signedIn() && Array.isArray(stats.orgs) && stats.orgs.length) {
+      Settings.data.orgs = stats.orgs;
+      if (Array.isArray(stats.positions) && stats.positions.length) Settings.data.positions = stats.positions;
+      if (typeof orgsSync === 'function') orgsSync(Settings.data);
+    }
+    const r = await _plogin.call(this, mode, ...args);
+    const box = document.querySelector('.auth-box');
+    if (box && mode === 'login' && !box.querySelector('.lcount')) {
+      box.querySelector('.auth-brand')?.nextElementSibling?.insertAdjacentHTML('afterend', `<div class="lcount"><div><b>${Number(stats.users) || 0}</b><span>зарегистрировано сотрудников</span></div><div><b>${Number(stats.patients) || 0}</b><span>пациентов в регистрах</span></div></div>`);
+    }
+    if (box && mode === 'reg') {
+      box.querySelectorAll('p.muted.small').forEach(p => { if (/в этом браузере/.test(p.textContent)) p.remove(); });
+      const lg = document.getElementById('r_lg');
+      if (lg) { lg.placeholder = 'рабочая почта или логин латиницей'; lg.closest('.fld')?.insertAdjacentHTML('beforeend', '<span class="fhint">С почтой можно будет самому восстановить пароль.</span>'); }
+    }
     if (mode === 'forgot' && $('#f_go')) $('#f_go').onclick = async () => {
       const lg = $('#f_login').value.trim(); if (!lg) return toast('Введите логин или e-mail', 'err');
       if (!lg.includes('@')) return toast('Письмо можно отправить только на e-mail. Если логин без @, пароль задаёт администратор.', 'err');
