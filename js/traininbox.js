@@ -65,11 +65,14 @@ const TrainInbox = {
     return { ...item, raw: { events: raw.events || [], warnings: raw.warnings || [] }, status: 'review', processedAt: nowISO(), schemaVersion: reg.version || 1, error: '' };
   },
 
-  /* две «общие папки», два регистра; пять выписок: одна про пациента, который уже есть в регистре, остальные новые */
-  async seed() {
+  /* две «общие папки» с автопилотом и ручные загрузки. Ночью ИИ сам разобрал документы из папок: завёл новых пациентов,
+     дополнил карточку знакомого пациента и разнёс выписку, которая подходит к обоим регистрам, в оба. Ручные загрузки и
+     документ без даты рождения ждут координатора. */
+  seed() { return (this.seeding ||= this.build().finally(() => { this.seeding = null; })); },
+  async build() {
     let st = this.state();
     const regsNow = await DB.all('registries');
-    if (st && st.v === 2 && st.sources.every(s => regsNow.some(r => r.id === s.registryId))) return st;
+    if (st && st.v === 3 && st.sources.every(s => regsNow.some(r => r.id === s.registryId))) return st;
     let regs = regsNow.filter(r => !r.archivedAt && (r.eventTypes || []).length);
     if (regs.length < 2 && typeof TEMPLATES === 'object' && TEMPLATES.surgaudit) {
       const r = TEMPLATES.surgaudit.make();
@@ -78,24 +81,104 @@ const TrainInbox = {
     }
     regs = [...regs.filter(r => r.id === 'training-example'), ...regs.filter(r => r.id !== 'training-example')].slice(0, 2);
     const center = TRAIN_USER.center, patients = await DB.all('patients');
-    const names = [['Сейткали', 'Ерлан', 'М'], ['Абенова', 'Динара', 'Ж'], ['Ким', 'Сергей', 'М'], ['Жумабаева', 'Асель', 'Ж'], ['Петров', 'Алексей', 'М']];
-    const items = [], sources = regs.map((reg, i) => ({ id: 'tsrc' + i, name: 'Общая папка «' + (i ? 'Хирургия' : 'Колопроктология') + '»', registryId: reg.id, center, lastScanAt: nowISO() }));
+    const sources = regs.map((reg, i) => ({ id: 'tsrc' + i, name: 'Общая папка «' + (i ? 'Хирургия' : 'Колопроктология') + '», автопилот ИИ', registryId: reg.id, center, lastScanAt: nowISO(), auto: true }));
+    const night = new Date(); night.setHours(3, 0, 0, 0); if (night > new Date()) night.setDate(night.getDate() - 1);
+    const at = minutes => new Date(night.getTime() + minutes * 60000).toISOString();
+    const people = [['Сейткали', 'Ерлан', 'М'], ['Абенова', 'Динара', 'Ж'], ['Ким', 'Сергей', 'М'], ['Жумабаева', 'Асель', 'Ж'], ['Петров', 'Алексей', 'М'], ['Оспанова', 'Гульнар', 'Ж'], ['Нуриев', 'Тимур', 'М']];
+    const items = [];
     let n = 0;
-    for (const [ri, reg] of regs.entries()) {
-      const known = patients.find(p => p.registryId === reg.id && p.localId && p.center === center);
-      for (let k = 0; k < (ri ? 2 : 3); k++) {
-        const [ln, fn, sex] = names[n % names.length];
-        const patient = k === 0 && known ? known : { localId: 'ИБ-' + (4100 + n), lastName: ln, firstName: fn, sex, birthDate: addDays(today(), -(19000 + n * 1700)) };
-        const text = this.document(reg, patient, n * 3);
-        items.push({ id: 'tin_' + (++n), filename: `Выписка ${patient.localId}.txt`, registryId: reg.id, center, patientNumber: patient.localId, encounter: '',
-          source: sources[ri].id, sourceName: sources[ri].name, receivedAt: new Date(Date.now() - n * 3600e3).toISOString(), status: 'waiting',
-          document: { text, pages: [text], ocrPages: [] } });
-      }
+    const person = known => { const [ln, fn, sex] = people[n % people.length]; return known || { localId: 'ИБ-' + (4100 + n), lastName: ln, firstName: fn, sex, birthDate: addDays(today(), -(19000 + n * 1700)) }; };
+    const add = (reg, src, patient, extra = {}) => {
+      let text = extra.text || this.document(reg, patient, n * 3);
+      if (extra.noBirth) text = text.replace(/^Дата рождения:.*\n/m, '');
+      const item = { id: 'tin_' + (++n), filename: `Выписка ${patient.localId}.txt`, registryId: reg.id, center, patientNumber: patient.localId, encounter: '',
+        source: src?.id || 'upload', sourceName: src?.name || '', manual: !src, receivedAt: src ? at(-60 + n * 7) : new Date(Date.now() - n * 600e3).toISOString(),
+        status: 'waiting', document: { text, pages: [text], ocrPages: [] }, ...extra.meta };
+      items.push(item);
+      return item;
+    };
+    const [r0, r1] = regs, known = patients.find(p => p.registryId === r0.id && p.localId && p.center === center);
+    /* папка «Колопроктология»: знакомый пациент, новый пациент, выписка сразу для двух регистров, документ без даты рождения */
+    if (known) add(r0, sources[0], known);
+    add(r0, sources[0], person());
+    if (r1) {
+      const both = person();
+      const text = this.document(r0, both, n * 3) + '\n' + this.document(r1, both, n * 3 + 1).split('\n').slice(7).join('\n');
+      const first = add(r0, sources[0], both, { text, meta: { routedTo: [r0.id, r1.id], routed: true } });
+      add(r1, sources[0], both, { text, meta: { routedFrom: first.id, routed: true, sourceName: sources[0].name } });
+      add(r1, sources[1], person());
     }
-    st = { v: 2, sources, items };
+    add(r0, sources[0], person(), { noBirth: true });
+    /* ручные загрузки: их подтверждает координатор */
+    add(r0, null, person());
+    if (known) add(r0, null, known);
+    st = { v: 3, sources, items };
     for (const [i, item] of st.items.entries()) { try { st.items[i] = await this.parse(item); } catch (e) { st.items[i] = { ...item, status: 'error', error: e.message }; } }
+    for (const [i, item] of st.items.entries()) {
+      if (item.status !== 'review' || item.manual) continue;
+      try { st.items[i] = await this.auto(item, at(5 + i * 4)); } catch (e) { st.items[i] = { ...item, autoNote: e.message }; }
+    }
     this.save(st);
     return st;
+  },
+
+  /* учебный автопилот: тот же порядок, что у фонового разбора на сервере */
+  async auto(item, stamp) {
+    const reg = await DB.get('registries', item.registryId);
+    const text = item.document.text, grab = label => (text.match(new RegExp('^' + label + ':\\s*(.+)$', 'm')) || [])[1]?.trim() || '';
+    const number = item.patientNumber || grab('Номер истории болезни');
+    if (!number) return { ...item, autoNote: 'В документе не найден № истории болезни' };
+    const same = p => String(p.localId || '').trim().toUpperCase() === number.toUpperCase() && p.center === item.center;
+    const all = await DB.all('patients'), here = all.filter(p => p.registryId === reg.id && same(p));
+    if (here.length > 1) return { ...item, autoNote: 'В регистре несколько карточек с № ИБ ' + number };
+    let patient = here[0], created = false;
+    if (!patient) {
+      const twin = all.find(same);
+      const birth = grab('Дата рождения').split('.').reverse().join('-');
+      const base = twin ? { lastName: twin.lastName, firstName: twin.firstName, middleName: twin.middleName || '', birthDate: twin.birthDate, sex: twin.sex }
+        : { lastName: grab('Фамилия'), firstName: grab('Имя'), middleName: '', birthDate: calendarDay(birth) || '', sex: grab('Пол') };
+      if (!base.lastName || !base.birthDate || !['М', 'Ж'].includes(base.sex)) return { ...item, autoNote: 'Для новой карточки в документе не найдены фамилия, дата рождения или пол' };
+      patient = await DB.put('patients', { registryId: reg.id, center: item.center, localId: number, ...base, createdBy: 'ai-intake', aiCreated: true, aiReview: 'ожидает',
+        aiAutoAt: stamp, intakeId: item.id, intakeFile: item.filename, ...(twin?.pid ? { pid: twin.pid } : {}) }, 'карточка создана ИИ из документа');
+      created = true;
+    }
+    const events = (await DB.all('events')).filter(e => e.patientId === patient.id);
+    const opener = Episodes.isPatient(reg) ? '' : Episodes.opener(reg);
+    const source = { fileName: item.filename, intakeId: item.id };
+    const added = [], skipped = [], ids = [], made = [];
+    const proposals = (item.raw?.events || []).slice().sort((a, b) => (b.type === opener) - (a.type === opener));
+    for (const proposal of proposals) {
+      const form = etById(reg, proposal?.type);
+      if (!form) continue;
+      const date = calendarDay(proposal.event_date);
+      if (!date) { skipped.push(form.name + ': нет даты'); continue; }
+      const fields = formFields(form).filter(f => f.type !== 'calc');
+      const { out } = AI.normalize(fields, [], proposal.fields);
+      const evidence = AI.fieldEvidence(out, proposal.evidence, source, item.document);
+      const keys = Object.keys(out).filter(k => evidence[k]?.verified);
+      if (!keys.length) { skipped.push(form.name + ': нет значений с цитатой'); continue; }
+      let anchor = null;
+      if (opener && form.id !== opener) {
+        const openers = [...made, ...events].filter(e => e.type === opener);
+        anchor = openers.filter(e => e.date <= date).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]
+          || openers.filter(e => e.date > date && e.date <= addDays(date, 180)).sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
+        if (!anchor) { skipped.push(form.name + ': не найден эпизод'); continue; }
+      }
+      const before = [...made, ...events].find(e => e.type === form.id && (form.single || (e.date === date && (e.anchorEventId || '') === (anchor?.id || ''))));
+      if (before && (before.locked || before.status !== 'черновик' || made.includes(before))) { skipped.push(form.name + ': уже есть в регистре'); continue; }
+      const fresh = keys.filter(k => isEmpty(before?.data?.[k]));
+      if (!fresh.length) { skipped.push(form.name + ': уже заполнено'); continue; }
+      const data = { ...(before?.data || {}) }; fresh.forEach(k => { data[k] = out[k]; });
+      const dateEvidence = AI.fieldEvidence({ date }, { date: proposal.date_evidence }, source, item.document).date;
+      const saved = await DB.put('events', { ...before, patientId: patient.id, registryId: reg.id, type: form.id, date: before?.date || date, data, status: 'черновик',
+        schemaVersion: reg.version, intakeId: item.id, intakeFile: item.filename, aiSource: true, aiAuto: true, aiAutoAt: stamp, aiReview: 'ожидает', aiFields: fresh,
+        aiEvidence: { ...(before?.aiEvidence || {}), ...Object.fromEntries(fresh.map(k => [k, evidence[k]])) }, ...(dateEvidence ? { dateEvidence } : {}),
+        ...(anchor ? { anchorEventId: anchor.id } : {}), createdBy: before?.createdBy || 'ai-intake' }, 'черновик заполнен ИИ из документа');
+      made.push(saved); ids.push(saved.id);
+      added.push({ type: form.id, name: form.name, date: saved.date, fields: fresh.length, eventId: saved.id, updated: !!before });
+    }
+    if (!ids.length) return { ...item, autoNote: skipped.length ? 'ИИ не смог записать: ' + skipped.join('; ') : 'В документе не найдено данных для форм регистра' };
+    return { ...item, status: 'accepted', auto: true, decidedBy: 'ai-intake', decidedAt: stamp, patientId: patient.id, newPatient: created, eventIds: ids, autoSummary: { added, skipped } };
   },
 
   candidates: async item => (await DB.all('patients')).filter(p => item.patientNumber && p.registryId === item.registryId && p.center === item.center
