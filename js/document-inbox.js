@@ -284,7 +284,7 @@ Routes.inbox = async main => {
     const centers = [...new Set([...registries.flatMap(reg => reg.centers), ...sources.map(source => source.center)])].sort((a, b) => a.localeCompare(b));
     main.innerHTML = `<div class="head"><h1>Документы из хранилища</h1><div class="row"><button class="btn" id="inRefresh">Обновить</button>
       ${registries.some(reg => !reg.archived && reg.centers.length) ? '<button class="btn primary" id="inUpload">Загрузить документы</button>' : ''}</div></div>
-      <div class="card"><p>В очередь поступают документы из общих папок и ручных загрузок. Перед записью подтвердите пациента, эпизод и поля.</p>
+      <div class="card"><p>В очередь поступают документы из общих папок и ручных загрузок. Документы из папок с автопилотом ИИ разбирает сам: находит или заводит пациента, распределяет по регистрам и сохраняет черновики с цитатами, а врач проверяет их по сводке «ИИ за сутки». Остальные документы, и те, что ИИ не смог разобрать сам, подтверждает координатор: пациента, эпизод и поля.</p>
       <div class="row"><label for="inState">Состояние</label><select id="inState" class="inp">
         <option value="all">Все</option><option value="pending">К обработке</option><option value="closed">Рассмотренные</option></select>
         <label for="inFilterReg">Регистр</label><select id="inFilterReg" class="inp"><option value="">Все регистры</option>
@@ -299,7 +299,10 @@ Routes.inbox = async main => {
       ${health ? '<p class="warnt">' + esc(health) + '</p>' : ''}</div>
       ${rows.length ? `<table class="tbl"><thead><tr><th>Документ</th><th>Учреждение</th><th>Поступил</th><th>Состояние</th><th></th></tr></thead><tbody>
       ${rows.map(item => `<tr><td>${esc(item.filename)}${item.previousId ? ' · новая версия' : ''}<div class="muted small">${esc(item.patientNumber || '')}</div></td>
-        <td>${esc(item.center)}<div class="muted small">${esc(regById.get(item.registryId)?.name || item.registryId)} · ${esc(item.manual ? 'Загрузка' : item.sourceName || 'Общая папка')}</div></td><td>${fmtDT(item.receivedAt)}</td><td>${esc(DocumentInbox.labels[item.status] || item.status)}${item.error || item.reason ? '<div class="muted small">' + esc(item.error || item.reason) + '</div>' : ''}</td>
+        <td>${esc(item.center)}<div class="muted small">${esc(regById.get(item.registryId)?.name || item.registryId)} · ${esc(item.manual ? 'Загрузка' : item.sourceName || 'Общая папка')}</div></td><td>${fmtDT(item.receivedAt)}</td><td>${esc(item.status === 'accepted' && item.decidedBy === 'ai-intake' ? 'Добавлено ИИ' : DocumentInbox.labels[item.status] || item.status)}${item.newPatient ? ' · новая карточка' : ''}
+          ${item.autoSummary?.added?.length ? '<div class="muted small">' + esc(item.autoSummary.added.map(x => x.name + ' (' + x.fields + ')').join(', ')) + ' · ждёт проверки врачом</div>' : ''}
+          ${item.status === 'review' && item.autoNote ? '<div class="warnt small">ИИ не записал сам: ' + esc(item.autoNote) + '</div>' : ''}
+          ${item.error || item.reason ? '<div class="muted small">' + esc(item.error || item.reason) + '</div>' : ''}</td>
         <td>${item.status === 'review' ? `<button class="btn primary xs" data-in-open="${item.id}">Проверить</button>` : ''}
         ${['error', 'review'].includes(item.status) ? `<button class="btn xs" data-in-retry="${item.id}">Повторить разбор</button>` : ''}
         ${item.patientId ? `<a class="btn xs" href="#patient/${esc(item.patientId)}">Карточка пациента</a>` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">В очереди пока нет документов.</p>'}`;
