@@ -638,3 +638,14 @@ html:has(.modal-wrap){overflow:hidden}
 main{overflow-x:hidden;overflow-x:clip}
 main .card,main .row,main .fld,main .inp{min-width:0;max-width:100%}
 main .head .btn{white-space:normal;max-width:100%;text-align:center}
+
+/* ИИ за сутки */
+.aid-line{margin:4px 0 10px}
+.aid-row{display:grid;grid-template-columns:minmax(180px,1.2fr) 2fr auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.aid-row .tag{margin-left:6px}
+.aid-new{background:color-mix(in srgb,var(--accent,#3b6fd4) 18%,transparent)}
+.aid-wait{background:color-mix(in srgb,#e0a030 22%,transparent)}
+.aid-review{border-left:4px solid var(--accent,#3b6fd4)}
+@media (max-width:700px){.aid-row{grid-template-columns:1fr}.aid-row .btn{justify-self:start}}
+/* колонки сетки не шире экрана: широкие таблицы прокручиваются внутри своего блока */
+.cols>*{min-width:0}
