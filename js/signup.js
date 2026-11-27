@@ -29,7 +29,7 @@ Pages.login = async function (mode = 'login', receipt = null) {
   document.body.className = '';
   const selfReg = Settings.data.selfReg !== false;
   if (!selfReg && mode === 'reg') mode = 'login';
-  const head = `<div class="auth-brand"><img src="media/addall-emblem.svg" alt=""><b>Add<i>All</i> 2.0</b></div><p class="muted">${esc([Settings.data.center, Settings.data.department].filter(Boolean).join(' ') || 'Платформа регистров')}</p>`;
+  const head = `<div class="auth-brand auth-logo"><img class="aa-logo" alt="AddAll 2.0, Registry Platform"></div><p class="muted">${esc([Settings.data.center, Settings.data.department].filter(Boolean).join(' ') || 'Платформа регистров')}</p>`;
   const tabs = selfReg ? `<div class="aseg"><button class="${mode === 'login' ? 'on' : ''}" data-am="login">Вход</button><button class="${mode === 'reg' ? 'on' : ''}" data-am="reg">Регистрация</button></div>` : '';
   let body = '';
   if (mode === 'wait') {
@@ -140,9 +140,9 @@ Pages.login = async function (mode = 'login', receipt = null) {
       const all = await DB.all('users');
       if (all.some(x => x.login?.toLowerCase() === u.login.toLowerCase())) return toast('Такой логин уже зарегистрирован', 'err');
       await setUserPassword(u, password);
-      await DB.rawPut('users', u);
+      const saved = await DB.rawPut('users', u);
       await DB.rawPut('audit', { id: uid('au_'), ts: nowISO(), user: u.id, userName: u.name, action: 'регистрация (заявка)', store: 'users', recId: u.id });
-      Pages.login('wait');
+      Pages.login('wait', saved?.applicationNumber ? { number: saved.applicationNumber } : null);
       } catch (error) { toast(error.message || 'Не удалось отправить заявку. Повторите отправку.', 'err'); }
       finally { button.disabled = false; }
     };
