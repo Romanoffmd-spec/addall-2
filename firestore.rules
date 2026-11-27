@@ -20,6 +20,26 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // открытые счётчики для страницы входа, признак саморегистрации и справочник учреждений и должностей для формы регистрации (их меняет только администратор)
+    match /meta/stats {
+      allow read: if true;
+      allow create: if active();
+      allow update: if active() && (admin() || (request.resource.data.get('selfReg', true) == resource.data.get('selfReg', true)
+        && request.resource.data.get('orgs', []) == resource.data.get('orgs', [])
+        && request.resource.data.get('positions', []) == resource.data.get('positions', [])));
+      allow delete: if false;
+    }
+
+    // заявки на регистрацию: человек создаёт учётную запись Firebase и оставляет заявку,
+    // участника (members) создаёт только администратор при подтверждении
+    match /signups/{uid} {
+      allow create: if signed() && request.auth.uid == uid && !isMember()
+        && request.resource.data.keys().hasOnly(['v', 'at', 'login', 'name']) && request.resource.data.v.size() < 20000;
+      allow read: if admin() || (signed() && request.auth.uid == uid);
+      allow update: if false;
+      allow delete: if admin();
+    }
+
     match /members/{uid} {
       allow read: if signed() && (request.auth.uid == uid || admin());
       // первый администратор при первом запуске, дальше участников заводит только администратор
