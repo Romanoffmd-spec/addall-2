@@ -262,7 +262,7 @@ Routes['registry-export'] = async (main, regId = '') => {
       <div class="row"><button class="btn" data-bx="omop" title="OMOP CDM 5.4: person, observation_period, visit_occurrence, condition_occurrence, procedure_occurrence, measurement, observation, death">OMOP CDM</button>
       <button class="btn" data-bx="sdtm" title="CDISC SDTM: DM, SV, MH, PR, AE и находки в домене XF, с описанием переменных">CDISC SDTM</button>
       <button class="btn" data-bx="aggregate" title="Только числа по группам: маленькие группы скрываются">Агрегированная (с порогом)</button>
-      <button class="btn" data-bx="manifest" title="Список образцов из формы «Биообразец» для лаборатории">Манифест биообразцов</button></div>
+      <button class="btn" data-bx="manifest" title="Список образцов из формы «Биообразец» для лаборатории">Список биообразцов</button></div>
       <div class="row"><div class="fld"><label for="bxMin">Порог малых групп для агрегированной выгрузки</label><input class="inp" type="number" min="2" max="50" id="bxMin" value="5"></div></div>
       <p class="muted small">Агрегированная выгрузка содержит только счёт по группам и медианы: группы меньше порога показаны как «&lt;порог», а соседние ячейки скрываются так, чтобы скрытое число нельзя было вычислить из итогов.</p>
       <p id="bxSummary" role="status"></p></section>`;
