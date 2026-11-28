@@ -284,7 +284,7 @@ Routes.inbox = async main => {
     const centers = [...new Set([...registries.flatMap(reg => reg.centers), ...sources.map(source => source.center)])].sort((a, b) => a.localeCompare(b));
     main.innerHTML = `<div class="head"><h1>Документы из хранилища</h1><div class="row"><button class="btn" id="inRefresh">Обновить</button>
       ${registries.some(reg => !reg.archived && reg.centers.length) ? '<button class="btn primary" id="inUpload">Загрузить документы</button>' : ''}</div></div>
-      <div class="card"><p>В очередь поступают документы из общих папок и ручных загрузок. Документы из папок с автопилотом ИИ разбирает сам: находит или заводит пациента, распределяет по регистрам и сохраняет черновики с цитатами, а врач проверяет их по сводке «ИИ за сутки». Остальные документы, и те, что ИИ не смог разобрать сам, подтверждает координатор: пациента, эпизод и поля.</p>
+      <div class="card"><p>В очередь поступают документы из общих папок и ручных загрузок. Документы из папок с автопилотом ИИ разбирает сам: находит или заводит пациента, распределяет по регистрам и сохраняет черновики с цитатами, а врач проверяет их по сводке «Сводка автозаполнения». Остальные документы, и те, что ИИ не смог разобрать сам, подтверждает координатор: пациента, эпизод и поля.</p>
       <div class="row"><label for="inState">Состояние</label><select id="inState" class="inp">
         <option value="all">Все</option><option value="pending">К обработке</option><option value="closed">Рассмотренные</option></select>
         <label for="inFilterReg">Регистр</label><select id="inFilterReg" class="inp"><option value="">Все регистры</option>
