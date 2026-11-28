@@ -106,7 +106,7 @@ Routes.home = async (main) => {
   const qreg = regs.find(r => (r.indicators || []).length && events.some(e => e.registryId === r.id)) || regs.find(r => (r.indicators || []).length);
   main.innerHTML = `
     <section class="hero"><div class="hero-bg" style="background-image:url(media/nroc-hero-hd.webp)"></div><div class="hero-in">
-      <div class="hero-k"><img class="aa-mark" data-dark="1" alt=""><span>${esc(Settings.data.center || 'AddAll 2.0')}</span></div>
+      <div class="hero-k"><img class="aa-mark" alt=""><span>${esc(Settings.data.center || 'AddAll 2.0')}</span></div>
       <h1>${hello}, ${esc(first)}</h1><p>${esc(Settings.data.department || 'Регистр результатов лечения')}: результаты лечения, наблюдение и качество в одном месте.</p>
       <span class="hero-date">${new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
       <div class="hero-act">${can('enter') ? '<button class="btn light" id="hNewP">+ Новый пациент</button><button class="btn glass" id="hNewAI">✦ Пациент из документа</button>' : ''}<button class="btn glass" id="hBrief">✦ Брифинг ИИ</button><a class="btn glass" href="#mdt">МДК</a><a class="btn glass" href="#trials">Исследования</a></div>
