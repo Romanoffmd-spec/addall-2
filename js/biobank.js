@@ -153,17 +153,18 @@ Routes.biobank = async (main, regId = '') => {
   };
   return Biobank.histPage(main, regs, hash);
 };
-ROUTE_GROUP.biobank = 'Наука';
+ROUTE_GROUP.biobank = 'Регистры';
 NAV_ICONS.biobank = '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h7"/>';
 
+/* отдельным блоком в разделе «Регистры», после списка регистров */
 {
   const previous = navGroups;
   navGroups = async function () {
     const groups = await previous();
-    const sci = groups.find(g => g.id === 'sci');
-    if (sci?.items && can('enter') && !sci.items.some(x => x && x.r === 'biobank')) {
-      const at = sci.items.findIndex(x => x && x.r === 'analytics');
-      sci.items.splice(at < 0 ? sci.items.length : at + 1, 0, { r: 'biobank', t: 'Гистологии', i: '🔬' });
+    const regs = groups.find(g => g.id === 'regs');
+    if (regs?.items && can('enter') && !regs.items.some(x => x && x.r === 'biobank')) {
+      const at = regs.items.findIndex(x => x && x.sep === '');
+      regs.items.splice(at < 0 ? regs.items.length : at, 0, { sep: 'Патоморфология' }, { r: 'biobank', t: 'Гистологии', i: '🔬' });
     }
     return groups;
   };
