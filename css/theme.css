@@ -657,20 +657,27 @@ main .head .btn{white-space:normal;max-width:100%;text-align:center}
 .auth-brand.auth-logo+p.muted{text-align:center}
 .t2-brand img.aa-mark,.hero-k img,.as-k img,.foot img.aa-mark{border-radius:0}
 
-/* ---------- вход: карточки счётчиков ---------- */
-.lcount.lcount2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0 8px}
-.lcount.lcount2>div{position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:14px 16px 13px;border-radius:14px;
-  background:linear-gradient(160deg,var(--accent-soft) 0%,var(--surface) 62%);border:1px solid var(--accent-line);box-shadow:inset 0 1px 0 rgba(255,255,255,.55),var(--sh1);transition:transform .25s var(--ease),box-shadow .25s var(--ease)}
-.lcount.lcount2>div::after{content:"";position:absolute;right:-28px;top:-28px;width:92px;height:92px;border-radius:50%;background:radial-gradient(circle,var(--accent-glow) 0%,transparent 70%);pointer-events:none}
-.lcount.lcount2>div:hover{transform:translateY(-1px);box-shadow:inset 0 1px 0 rgba(255,255,255,.55),var(--sh2)}
-.lcount.lcount2 .lc-ic{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--surface);border:1px solid var(--accent-line);color:var(--navy);margin-bottom:6px}
-.lcount.lcount2 .lc-ic svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-.lcount.lcount2 b{font-family:var(--f-disp);font-size:30px;line-height:1.05;font-weight:700;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums}
-.lcount.lcount2 span:not(.lc-ic){font-size:12.5px;line-height:1.3;color:var(--muted)}
-html[data-theme=dark] .lcount.lcount2>div{background:linear-gradient(160deg,rgba(71,168,245,.10) 0%,rgba(255,255,255,.015) 65%);border-color:rgba(71,168,245,.22);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
-html[data-theme=dark] .lcount.lcount2 .lc-ic{background:rgba(71,168,245,.12);border-color:rgba(71,168,245,.28)}
-html[data-theme=dark] .lcount.lcount2 b{color:#F4F6FA}
-@media (max-width:420px){.lcount.lcount2{gap:10px}.lcount.lcount2>div{padding:12px 13px}.lcount.lcount2 b{font-size:26px}}
+/* ---------- вход: карточки счётчиков (стиль карточек shadcn, анимация Motion и anime.js в regform.js) ---------- */
+.lcount.lcount2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0 10px}
+.lcount2 .lc-tile{position:relative;overflow:hidden;isolation:isolate;display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;padding:13px 15px 12px;border-radius:14px;
+  background:var(--surface);border:1px solid var(--line);box-shadow:var(--sh1);will-change:transform}
+.lcount2 .lc-glow{position:absolute;inset:0;z-index:-1;background:radial-gradient(240px circle at var(--mx,85%) var(--my,0%),var(--accent-glow),transparent 62%);opacity:.9;transition:opacity .3s}
+.lcount2 .lc-tile:hover .lc-glow{opacity:1}
+.lcount2 .lc-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.lcount2 .lc-ic{display:grid;place-items:center;width:26px;height:26px;border-radius:8px;background:var(--accent-soft);color:var(--navy);border:1px solid var(--accent-line)}
+.lcount2 .lc-ic svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lcount2 .lc-lab{font-size:12.5px;font-weight:600;color:var(--ink2);letter-spacing:.01em}
+.lcount2 .lc-num{font-family:var(--f-disp);font-size:32px;line-height:1;font-weight:700;letter-spacing:-.03em;color:var(--ink);font-variant-numeric:tabular-nums}
+.lcount2 .lc-cap{font-size:12px;line-height:1.3;color:var(--muted)}
+.lcount2 .lc-live{display:inline-flex;align-items:center;gap:6px;margin-top:7px;font-size:11px;color:var(--muted)}
+.lcount2 .lc-live i{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+.lcount2.lc-pre .lc-tile{opacity:0}
+html[data-theme=dark] .lcount2 .lc-tile{background:rgba(255,255,255,.025);border-color:rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+html[data-theme=dark] .lcount2 .lc-ic{background:rgba(71,168,245,.12);border-color:rgba(71,168,245,.28)}
+html[data-theme=dark] .lcount2 .lc-lab{color:#D4D7DE}
+html[data-theme=dark] .lcount2 .lc-num{color:#F4F6FA}
+html[data-theme=dark] .lcount2 .lc-live i{box-shadow:0 0 0 3px rgba(14,138,79,.22)}
+@media (max-width:420px){.lcount.lcount2{gap:10px}.lcount2 .lc-tile{padding:12px 12px 11px}.lcount2 .lc-num{font-size:28px}}
 
 /* ---------- регистрация: пропущенные поля ---------- */
 .f-bad .inp,.f-bad select.inp{border-color:var(--due)!important;box-shadow:0 0 0 3px rgba(217,45,32,.14)!important}
