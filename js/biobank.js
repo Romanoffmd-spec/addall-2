@@ -199,8 +199,8 @@ Routes.biobank = async (main, regId = '', tab = '') => {
       : `<p>Образец заносится в карточку пациента формой «Биообразец»: номер, тип, дата забора, место хранения, согласие и статус.
       Здесь видны все образцы доступных регистров, а список для отправки в лабораторию содержит код пациента вместо ФИО.</p>`}
       <div class="row">${regs.length ? regSelect(regs, pick?.id || '', 'bbReg', false) : ''}
-      ${pick && !hist && !Biobank.has(pick) && can('design') ? '<button class="btn primary" id="bbAdd">Добавить форму «Биообразец» в этот регистр</button>' : ''}
-      ${pick && hist && !Biobank.hasHist(pick) && can('design') ? '<button class="btn primary" id="bbAddHist">Добавить форму «Гистологическое заключение» в этот регистр</button>' : ''}
+      ${pick && !hist && !Biobank.has(pick) && can('design') ? '<button class="btn primary" id="bbAdd" style="white-space:normal">Добавить форму «Биообразец» в этот регистр</button>' : ''}
+      ${pick && hist && !Biobank.hasHist(pick) && can('design') ? '<button class="btn primary" id="bbAddHist" style="white-space:normal">Добавить форму «Гистологическое заключение» в этот регистр</button>' : ''}
       ${hist && can('design') && regs.filter(r => !r.archivedAt && !Biobank.hasHist(r)).length > 1 ? '<button class="btn" id="bbAddHistAll">Добавить во все регистры</button>' : ''}
       ${pick && (hist ? !Biobank.hasHist(pick) : !Biobank.has(pick)) && !can('design') ? `<span class="muted">В этом регистре нет формы «${hist ? 'Гистологическое заключение' : 'Биообразец'}». Попросите администратора регистра добавить её.</span>` : ''}
       ${pick && !hist && Biobank.has(pick) && train && can('enter') ? '<button class="btn" id="bbDemo">Создать учебные образцы</button>' : ''}</div></section>
@@ -215,7 +215,7 @@ Routes.biobank = async (main, regId = '', tab = '') => {
       <select class="inp" id="bbType" aria-label="Тип образца"><option value="">Все типы</option>${Biobank.TYPES.map(s => `<option>${esc(s)}</option>`).join('')}</select></div>
       <div id="bbTable"><p class="muted">Загрузка…</p></div>
       <div class="row"><label class="chk"><input type="checkbox" id="bbDates" checked>Даты забора в списке</label>
-      <button class="btn primary" id="bbManifest">Список образцов для отправки в лабораторию (Excel)</button><span class="muted small" id="bbNote"></span></div></section>`}`;
+      <button class="btn primary" id="bbManifest" title="Список образцов для отправки в лабораторию: код пациента вместо ФИО">Список для лаборатории (Excel)</button><span class="muted small" id="bbNote"></span></div></section>`}`;
   const sel = $('#bbReg', main); if (sel) sel.onchange = () => go('biobank/' + sel.value + (hist ? '/hist' : ''));
   const add = $('#bbAdd', main);
   if (add) add.onclick = async () => {
