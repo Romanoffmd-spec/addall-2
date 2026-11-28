@@ -1,6 +1,6 @@
 /* AddAll 2.0: выгрузки для партнёров.
    OMOP CDM 5.4, CDISC SDTM, агрегированная выгрузка с порогом малых групп (первичное и вторичное скрытие),
-   манифест биообразцов и шаблоны выгрузки под получателя.
+   шаблоны выгрузки под получателя.
    Источник один: комплект RegistryExport.assemble, те же фильтры, обезличивание и выбор полей.
    Подключается после exports.js. */
 'use strict';
@@ -297,26 +297,12 @@ AE: поля об осложнениях со значением, отличны
       ['Черновики ' + (bundle.filters.drafts ? 'включены.' : 'не включены.')]];
   },
 
-  /* ---------- манифест биообразцов ---------- */
-  MANIFEST_COLS: ['participant_id', 'sample_id', 'sample_type', 'source', 'collection_date', 'collection_day', 'volume', 'unit', 'storage_location', 'storage_temperature', 'consent', 'status', 'shipped_to'],
-  manifest(bundle) {
-    const T = bundle.tables, form = 'biosample';
-    const map = { bs_id: 'sample_id', bs_type: 'sample_type', bs_source: 'source', bs_volume: 'volume', bs_unit: 'unit', bs_box: 'storage_location', bs_temp: 'storage_temperature', bs_consent: 'consent', bs_status: 'status', bs_to: 'shipped_to' };
-    const rows = T.events.filter(e => e.form === form).map(e => {
-      const r = { participant_id: e.participant_id, collection_date: bundle.identified ? e.date : '', collection_day: e.day ?? '' };
-      for (const v of T.values.filter(x => x.record_table === 'events' && x.record_id === e.event_id)) if (map[v.field]) r[map[v.field]] = this.value(v);
-      return r;
-    });
-    return { rows, noConsent: rows.filter(r => r.consent !== 'да').length };
-  },
-
   /* ---------- шаблоны получателей ---------- */
   BUILTIN: [
     { id: 'journal', name: 'Журнал: данные к статье', format: 'xlsx', privacy: 'coded', drafts: false, stablePid: false, hint: 'Обезличенный комплект без черновиков. «Таблица 1» и схема отбора STROBE строятся в Аналитике.' },
     { id: 'stat', name: 'Статистик: SPSS', format: 'spss', privacy: 'coded', drafts: false, stablePid: false, hint: 'CSV по формам и синтаксис SPSS с метками.' },
     { id: 'omop', name: 'Научный центр: OMOP CDM', format: 'omop', privacy: 'coded', drafts: false, stablePid: true, hint: 'Сдвинутые даты, постоянный код пациента для повторных передач.' },
     { id: 'sdtm', name: 'Научный центр или спонсор: CDISC SDTM', format: 'sdtm', privacy: 'coded', drafts: false, stablePid: true, hint: 'Домены DM, SV, MH, PR, AE, XF и описание переменных.' },
-    { id: 'lab', name: 'Лаборатория или биобанк: список образцов', format: 'manifest', privacy: 'coded', drafts: true, stablePid: true, hint: 'Постоянный код пациента, чтобы результаты лаборатории можно было вернуть в регистр.' },
     { id: 'moh', name: 'Минздрав: агрегированные данные, порог 5', format: 'aggregate', privacy: 'coded', drafts: false, stablePid: false, minCell: 5, hint: 'Только числа по группам, группы меньше 5 скрыты.' },
     { id: 'intl', name: 'Международный регистр: агрегированные данные, порог 10', format: 'aggregate', privacy: 'coded', drafts: false, stablePid: false, minCell: 10, hint: 'Только числа по группам, группы меньше 10 скрыты.' },
     { id: 'redcap', name: 'Партнёр на REDCap', format: 'redcap', privacy: 'coded', drafts: false, stablePid: false, hint: 'Словарь данных и файл импорта REDCap.' }
@@ -347,12 +333,6 @@ AE: поля об осложнениях со значением, отличны
     if (format === 'aggregate') {
       const k = bundle.minCell || 5;
       return Office.book(fileName + '_aggregate_k' + k + '.xlsx', [{ name: 'README', rows: X.aggregateReadme(bundle, k) }, { name: 'Агрегированные', rows: X.aggregate(bundle, k) }]);
-    }
-    if (format === 'manifest') {
-      const m = X.manifest(bundle);
-      if (!m.rows.length) throw new Error('В регистре нет формы «Биообразец» или образцов за выбранный период. Форма добавляется на странице «Биобанк»');
-      if (m.noConsent) toast('Образцов без отметки о согласии: ' + m.noConsent + '. Проверьте перед отправкой', 'err');
-      return Office.book(fileName + '_samples_manifest.xlsx', [{ name: 'Manifest', rows: [X.MANIFEST_COLS, ...m.rows.map(r => X.MANIFEST_COLS.map(c => r[c] ?? ''))] }]);
     }
     return previous(bundle, format, fileName);
   };
