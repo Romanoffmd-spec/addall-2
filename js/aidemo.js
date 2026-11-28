@@ -24,7 +24,7 @@ const AIDemo = {
     const t = f.type, s = String(v).trim();
     if (t === 'number' || t === 'integer') { const n = Number(s.replace(',', '.').match(/-?\d+([.]\d+)?/)?.[0]); return Number.isFinite(n) ? n : null; }
     if (t === 'date') return AIDemo.day(s);
-    if (t === 'yesno') return /^да\b/i.test(s) ? 'да' : /^нет\b/i.test(s) ? 'нет' : null;
+    if (t === 'yesno') return /^да(?![а-яё])/i.test(s) ? 'да' : /^нет(?![а-яё])/i.test(s) ? 'нет' : null; /* \b не работает с кириллицей */
     if (t === 'select') return (f.allowed || []).find(o => AIDemo.norm(o) === AIDemo.norm(s)) || (f.allowed || []).find(o => AIDemo.norm(s).includes(AIDemo.norm(o))) || null;
     if (t === 'multiselect') { const picks = (f.allowed || []).filter(o => AIDemo.norm(s).includes(AIDemo.norm(o))); return picks.length ? picks : null; }
     if (['text', 'textarea', 'icd10', 'icdo'].includes(t)) return s;
