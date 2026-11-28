@@ -1,4 +1,4 @@
-/* AddAll 2.0: «ИИ за сутки». Что ИИ сам нашёл в хранилище документов, кого завёл, что заполнил и куда добавил.
+/* AddAll 2.0: «Сводка автозаполнения». Что ИИ сам нашёл в хранилище документов, кого завёл, что заполнил и куда добавил.
    Источник: карточки и черновики с отметками aiCreated и aiAuto (их ставит фоновый разбор на сервере или учебный автопилот)
    и очередь документов, которые ИИ оставил человеку. Сводка видна на главной, в колокольчике, в брифинге и на своей странице;
    врач открывает карточку, проверяет по цитатам и сохраняет форму, после этого отметка «ждёт проверки» снимается.
@@ -70,7 +70,7 @@ const AIDigest = {
 
   panel(d) {
     const top = d.cards.slice(0, 5);
-    return `<div class="panel wide aid-panel" id="aiDigest"><div class="ph"><h2>✦ ИИ за сутки</h2><span class="muted">хранилище документов</span><a class="r" href="#aidigest">Вся сводка</a></div>
+    return `<div class="panel wide aid-panel" id="aiDigest"><div class="ph"><h2>✦ Сводка автозаполнения</h2><span class="muted">хранилище документов</span><a class="r" href="#aidigest">Вся сводка</a></div>
       <p class="aid-line">${esc(this.line(d))}</p>
       ${top.length ? top.map(c => this.row(c, true)).join('') : ''}
       ${d.cards.length > 5 ? `<a class="btn sm" href="#aidigest">Ещё ${d.cards.length - 5}</a>` : ''}
@@ -81,7 +81,7 @@ const AIDigest = {
 Routes.aidigest = async main => {
   const d = await AIDigest.collect(true);
   const fresh = d.cards.filter(c => c.fresh), older = d.cards.filter(c => !c.fresh && c.waiting);
-  main.innerHTML = `<div class="head"><h1>ИИ за сутки</h1><button class="btn" id="aidRefresh">Обновить</button></div>
+  main.innerHTML = `<div class="head"><h1>Сводка автозаполнения</h1><button class="btn" id="aidRefresh">Обновить</button></div>
     <div class="card"><p>${esc(AIDigest.line(d))}</p>
     <p class="muted small">Каждую ночь и в течение дня ИИ читает новые документы из общих папок больницы: находит пациента по № ИБ, если его нет, заводит карточку, решает, к каким регистрам относится документ, и заполняет формы черновиками. Каждое значение подтверждено дословной цитатой из документа. Черновики не попадают в аналитику и отчёты, пока врач их не проверит: откройте карточку, сверьте значения по цитатам и сохраните форму.</p></div>
     <div class="card" id="aidFresh"><h2>Добавлено за последние 24 часа</h2>${fresh.length ? fresh.map(c => AIDigest.row(c)).join('') : '<p class="muted">Новых записей нет.</p>'}</div>
@@ -101,7 +101,7 @@ NAV_ICONS.aidigest = NAV_ICONS.aidigest || '✦';
     const work = groups.find(g => g.id === 'work');
     if (work?.items && can('enter') && !work.items.some(x => x.r === 'aidigest')) {
       const at = work.items.findIndex(x => x.r === 'inbox');
-      work.items.splice(at < 0 ? 0 : at + 1, 0, { r: 'aidigest', t: 'ИИ за сутки', i: '✦' });
+      work.items.splice(at < 0 ? 0 : at + 1, 0, { r: 'aidigest', t: 'Сводка автозаполнения', i: '✦' });
     }
     /* простое меню врача прячет «Науку»; аналитику (χ², Каплан-Мейер) оставляем в «Работе» */
     if (work?.items && typeof SimpleNav === 'object' && SimpleNav.on() && can('analyse') && !work.items.some(x => x.r === 'analytics')) {
@@ -138,7 +138,7 @@ if (typeof SimpleNav === 'object' && !SimpleNav.WORK.includes('aidigest')) Simpl
     try {
       const d = AIDigest.last && Date.now() - Date.parse(AIDigest.last.at || 0) < 60000 ? AIDigest.last : await AIDigest.collect();
       d.at = d.at || nowISO();
-      if (d.waitingCards) out.unshift({ k: 'due', t: `ИИ за сутки: ${d.waitingCards} ${d.waitingCards === 1 ? 'карточка ждёт' : 'карточек ждут'} проверки`, s: `новых пациентов ${d.newCards.length}, форм ${d.fresh.length}`, r: 'aidigest' });
+      if (d.waitingCards) out.unshift({ k: 'due', t: `Сводка автозаполнения: ${d.waitingCards} ${d.waitingCards === 1 ? 'карточка ждёт' : 'карточек ждут'} проверки`, s: `новых пациентов ${d.newCards.length}, форм ${d.fresh.length}`, r: 'aidigest' });
       if (d.manual.length) out.unshift({ k: 'warn', t: `Документы для ручного разбора: ${d.manual.length}`, s: 'ИИ не смог разобрать их сам', r: 'inbox' });
     } catch (e) { }
     return out;
