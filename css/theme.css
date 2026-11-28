@@ -686,3 +686,48 @@ label.chk.f-bad span{color:var(--due)}
 .ferr{display:block;margin-top:5px;font-size:12px;color:var(--due);font-weight:500}
 label.chk.f-bad{flex-wrap:wrap}label.chk.f-bad .ferr{flex-basis:100%}
 .rf-x{margin-top:8px}
+
+/* ---------- главная: hero в светлой теме (светлая версия фото здания, тёмный текст) ---------- */
+html:not([data-theme=dark]) .hero{background:linear-gradient(180deg,#FBFDFF 0%,#F1F6FC 100%);border:1px solid var(--line);box-shadow:0 1px 2px rgba(10,10,20,.04),0 18px 40px -24px rgba(10,60,120,.25)}
+html:not([data-theme=dark]) .hero-bg{background-image:url(../media/nroc-hero-light.webp)!important;left:34%;opacity:1;filter:none;background-position:center 58%;
+  -webkit-mask-image:linear-gradient(90deg,transparent 0,rgba(0,0,0,.55) 30%,#000 60%);mask-image:linear-gradient(90deg,transparent 0,rgba(0,0,0,.55) 30%,#000 60%)}
+html:not([data-theme=dark]) .hero::before{background:
+  radial-gradient(800px 380px at 6% 0%,rgba(10,108,194,.10),transparent 62%),
+  linear-gradient(90deg,#FBFDFF 0%,rgba(251,253,255,.92) 34%,rgba(251,253,255,.35) 62%,rgba(251,253,255,0) 100%)}
+html:not([data-theme=dark]) .hero::after{background-image:linear-gradient(rgba(10,60,120,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(10,60,120,.05) 1px,transparent 1px)}
+html:not([data-theme=dark]) .hero-in{color:var(--ink)}
+html:not([data-theme=dark]) .hero-k{color:var(--muted)}
+html:not([data-theme=dark]) .hero-k span{border-left-color:var(--line)}
+html:not([data-theme=dark]) .hero h1{color:var(--ink)}
+html:not([data-theme=dark]) .hero h1 .hl{background:linear-gradient(90deg,#0A6CC2,#3E9BE8);-webkit-background-clip:text;background-clip:text;color:transparent}
+html:not([data-theme=dark]) .hero p{color:var(--ink2)}
+html:not([data-theme=dark]) .hero-date{border-color:var(--line);background:rgba(255,255,255,.75);color:var(--ink2)}
+html:not([data-theme=dark]) .hero .btn.light{background:#0B0B0F;color:#fff;border-color:#0B0B0F}
+html:not([data-theme=dark]) .hero .btn.light:hover{background:#26262E;border-color:#26262E}
+html:not([data-theme=dark]) .hero .btn.glass{background:rgba(255,255,255,.8);border-color:var(--ctrl);color:var(--ink);backdrop-filter:blur(6px)}
+html:not([data-theme=dark]) .hero .btn.glass:hover{background:#fff;border-color:var(--ctrl-h)}
+
+/* ---------- боковая панель: постоянные пункты над «Учебным режимом» ---------- */
+.sb-foot .sb-fixed{display:grid;gap:1px;padding-bottom:6px;margin-bottom:6px;border-bottom:1px solid var(--line2)}
+
+/* ---------- экран загрузки: эмблема, змея ползёт по посоху ---------- */
+.loading.splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:0;margin:0;background:var(--bg);color:var(--ink);font-family:var(--f);animation:sp-in .5s var(--ease) both}
+.splash .sp-mark{width:118px;height:auto;overflow:visible}
+.splash .sp-arc{fill:none;stroke:#E3B341;stroke-width:3;stroke-linecap:round;opacity:.9}
+.splash .sp-crown{fill:#E3B341}
+.splash .sp-staff{fill:none;stroke:#1B2A5C;stroke-width:5;stroke-linecap:round}
+.splash .sp-tip{fill:#1B2A5C}
+.splash .sp-track{fill:none;stroke:#2E7BD6;stroke-width:7;stroke-linecap:round;opacity:.12}
+.splash .sp-snake{fill:none;stroke:url(#spSnake);stroke-width:7;stroke-linecap:round;stroke-dasharray:38 100;stroke-dashoffset:0;animation:sp-crawl 1.7s cubic-bezier(.45,0,.55,1) infinite alternate}
+.splash .sp-word{margin-top:18px;font:800 40px/1 var(--f-disp);letter-spacing:-.035em}
+.splash .sp-word b{color:#1B2A5C;font-weight:800}.splash .sp-word i{font-style:normal;color:#2E7BD6}
+.splash .sp-sub{margin-top:9px;font-size:10.5px;font-weight:600;letter-spacing:.32em;text-transform:uppercase;color:var(--muted)}
+.splash .sp-load{margin-top:22px;font-size:12.5px;color:var(--faint)}
+.splash .sp-load::after{content:"";display:inline-block;width:1.2em;text-align:left;animation:sp-dots 1.2s steps(4) infinite}
+html[data-theme=dark] .splash .sp-staff{stroke:#E8EEF8}html[data-theme=dark] .splash .sp-tip{fill:#E8EEF8}
+html[data-theme=dark] .splash .sp-word b{color:#F4F6FA}html[data-theme=dark] .splash .sp-word i{color:#5BB0F6}
+html[data-theme=dark] .splash .sp-track{stroke:#5BB0F6;opacity:.14}
+@keyframes sp-crawl{from{stroke-dashoffset:0}to{stroke-dashoffset:-62}}
+@keyframes sp-dots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+@keyframes sp-in{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.splash .sp-snake{animation:none;stroke-dasharray:none}}
