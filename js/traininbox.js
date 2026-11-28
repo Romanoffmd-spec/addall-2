@@ -56,6 +56,28 @@ const TrainInbox = {
     return out.join('\n');
   },
 
+  /* учебный бланк гистологического заключения: подписи совпадают с полями формы «Гистологическое заключение» */
+  histText(patient, offset, kind) {
+    const date = addDays(today(), -offset - 20), rdate = addDays(date, 6);
+    const surg = kind === 'surgery';
+    const rows = [['ГИСТОЛОГИЧЕСКОЕ ЗАКЛЮЧЕНИЕ', ''], ['(учебный бланк, вымышленный пациент)', ''], ['Номер истории болезни', patient.localId], ['Фамилия', patient.lastName], ['Имя', patient.firstName],
+      ['Дата рождения', this.ru(patient.birthDate)], ['Пол', patient.sex], ['', ''],
+      ['Номер гистологического заключения', 'Г-' + date.slice(2, 4) + '-' + (2400 + offset)], ['Патоморфологическая лаборатория', 'Учебная лаборатория патоморфологии'],
+      ['Дата забора материала', this.ru(date)], ['Дата заключения', this.ru(rdate)],
+      ['Вид материала', surg ? 'операционный материал' : 'эндоскопическая биопсия'], ['Когда взят материал', surg ? 'после неоадъювантной терапии' : 'до лечения'],
+      ['Орган', surg ? 'прямая кишка' : 'сигмовидная кишка'], ['Локализация (уровень, отдел, расстояние)', surg ? 'среднеампулярный отдел, 8 см от анального края' : 'сигмовидная кишка, 25 см'],
+      ...(surg ? [['Операция (для операционного материала)', 'Низкая передняя резекция прямой кишки с тотальной мезоректумэктомией'], ['Размер опухоли, мм', '28']] : []),
+      ['Гистологический тип', 'аденокарцинома'], ['Степень дифференцировки', 'G2 (умереннодифференцированная)'], ['Код морфологии МКБ-О', '8140/3'],
+      ...(surg ? [['Префикс y (после неоадъювантной терапии)', 'да'], ['pT', 'T3'], ['pN', 'N1a'], ['pM', 'M0'], ['Лимфоузлов исследовано', '17'], ['Лимфоузлов с метастазами', '1'],
+        ['Опухолевые депозиты', 'нет'], ['Лимфоваскулярная инвазия', 'да'], ['Периневральная инвазия', 'нет'], ['Экстрамуральная венозная инвазия (EMVI)', 'нет'],
+        ['Опухолевое почкование (budding)', 'Bd2'], ['CRM, мм', '4'], ['CRM', 'отрицательный (больше 1 мм)'], ['Дистальный край резекции, мм', '25'], ['Радикальность (R)', 'R0'],
+        ['Качество мезоректумэктомии (Quirke)', 'полная (grade 3)'], ['Шкала регресса опухоли', 'AJCC/CAP'], ['Степень регресса (TRG)', '2']]
+        : [['Дисплазия', 'высокой степени'], ['Лимфоваскулярная инвазия', 'нет']]),
+      ['MMR / MSI', 'pMMR / MSS'], ['KRAS', surg ? 'мутация' : 'не исследован'], ['NRAS', surg ? 'дикий тип' : 'не исследован'], ['BRAF V600E', surg ? 'нет мутации' : 'не исследован'],
+      ['', ''], ['Текст заключения', surg ? 'Умереннодифференцированная аденокарцинома прямой кишки после неоадъювантной терапии, ypT3N1a, R0, CRM 4 мм, TRG 2 (AJCC).' : 'Фрагменты умереннодифференцированной аденокарциномы сигмовидной кишки.']];
+    return rows.map(([l, v]) => l && v ? `${l}: ${v}` : l || '').join('\n');
+  },
+
   async parse(item) {
     const reg = await DB.get('registries', item.registryId);
     if (!reg) throw new Error('Регистр не найден');
@@ -72,7 +94,7 @@ const TrainInbox = {
   async build() {
     let st = this.state();
     const regsNow = await DB.all('registries');
-    if (st && st.v === 3 && st.sources.every(s => regsNow.some(r => r.id === s.registryId))) return st;
+    if (st && st.v === 4 && st.sources.every(s => regsNow.some(r => r.id === s.registryId))) return st;
     let regs = regsNow.filter(r => !r.archivedAt && (r.eventTypes || []).length);
     if (regs.length < 2 && typeof TEMPLATES === 'object' && TEMPLATES.surgaudit) {
       const r = TEMPLATES.surgaudit.make();
@@ -97,6 +119,8 @@ const TrainInbox = {
       items.push(item);
       return item;
     };
+    /* бланки гистологий: форма «Гистологическое заключение» в учебном регистре колопроктологии */
+    if (typeof Biobank === 'object' && regs[0] && !Biobank.hasHist(regs[0])) regs[0] = await Biobank.addHist(regs[0]);
     const [r0, r1] = regs, known = patients.find(p => p.registryId === r0.id && p.localId && p.center === center);
     /* папка «Колопроктология»: знакомый пациент, новый пациент, выписка сразу для двух регистров, документ без даты рождения */
     if (known) add(r0, sources[0], known);
@@ -109,6 +133,13 @@ const TrainInbox = {
       add(r1, sources[1], person());
     }
     add(r0, sources[0], person(), { noBirth: true });
+    /* гистологии: операционный материал знакомого пациента и биопсия нового пациента */
+    if (typeof Biobank === 'object' && Biobank.hasHist(r0)) {
+      const hp = known || person();
+      const h1 = add(r0, sources[0], hp, { text: this.histText(hp, n * 3, 'surgery') }); h1.filename = `Гистология ${hp.localId}.txt`;
+      const np = person();
+      const h2 = add(r0, sources[0], np, { text: this.histText(np, n * 3, 'biopsy') }); h2.filename = `Гистология ${np.localId}.txt`;
+    }
     /* ручные загрузки: их подтверждает координатор */
     add(r0, null, person());
     if (known) add(r0, null, known);
@@ -162,7 +193,7 @@ const TrainInbox = {
         const openers = [...made, ...events].filter(e => e.type === opener);
         anchor = openers.filter(e => e.date <= date).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]
           || openers.filter(e => e.date > date && e.date <= addDays(date, 180)).sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
-        if (!anchor) { skipped.push(form.name + ': не найден эпизод'); continue; }
+        if (!anchor && !form.noEpisode) { skipped.push(form.name + ': не найден эпизод'); continue; }
       }
       const before = [...made, ...events].find(e => e.type === form.id && (form.single || (e.date === date && (e.anchorEventId || '') === (anchor?.id || ''))));
       if (before && (before.locked || before.status !== 'черновик' || made.includes(before))) { skipped.push(form.name + ': уже есть в регистре'); continue; }
