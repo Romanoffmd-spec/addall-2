@@ -316,7 +316,7 @@ AE: поля об осложнениях со значением, отличны
     { id: 'stat', name: 'Статистик: SPSS', format: 'spss', privacy: 'coded', drafts: false, stablePid: false, hint: 'CSV по формам и синтаксис SPSS с метками.' },
     { id: 'omop', name: 'Научный центр: OMOP CDM', format: 'omop', privacy: 'coded', drafts: false, stablePid: true, hint: 'Сдвинутые даты, постоянный код пациента для повторных передач.' },
     { id: 'sdtm', name: 'Научный центр или спонсор: CDISC SDTM', format: 'sdtm', privacy: 'coded', drafts: false, stablePid: true, hint: 'Домены DM, SV, MH, PR, AE, XF и описание переменных.' },
-    { id: 'lab', name: 'Лаборатория или биобанк: манифест образцов', format: 'manifest', privacy: 'coded', drafts: true, stablePid: true, hint: 'Постоянный код пациента, чтобы результаты лаборатории можно было вернуть в регистр.' },
+    { id: 'lab', name: 'Лаборатория или биобанк: список образцов', format: 'manifest', privacy: 'coded', drafts: true, stablePid: true, hint: 'Постоянный код пациента, чтобы результаты лаборатории можно было вернуть в регистр.' },
     { id: 'moh', name: 'Минздрав: агрегированные данные, порог 5', format: 'aggregate', privacy: 'coded', drafts: false, stablePid: false, minCell: 5, hint: 'Только числа по группам, группы меньше 5 скрыты.' },
     { id: 'intl', name: 'Международный регистр: агрегированные данные, порог 10', format: 'aggregate', privacy: 'coded', drafts: false, stablePid: false, minCell: 10, hint: 'Только числа по группам, группы меньше 10 скрыты.' },
     { id: 'redcap', name: 'Партнёр на REDCap', format: 'redcap', privacy: 'coded', drafts: false, stablePid: false, hint: 'Словарь данных и файл импорта REDCap.' }
