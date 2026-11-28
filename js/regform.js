@@ -160,10 +160,20 @@ const RegForm = {
 {
   const previous = Pages.login;
   Pages.login = async function (mode = 'login', ...args) {
+    /* страница входа всегда в тёмном оформлении, выбранная пользователем тема возвращается после входа */
+    document.documentElement.dataset.theme = 'dark';
     const r = await previous.call(this, mode, ...args);
     const box = document.querySelector('.auth-box');
     if (box && mode === 'login') RegForm.counters(box);
     if (box && mode === 'reg') RegForm.form(box);
     return r;
+  };
+}
+{
+  const shell = App.shell.bind(App);
+  App.shell = async function (...a) {
+    let t = 'light'; try { t = localStorage.getItem('addall2.theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch (e) { }
+    document.documentElement.dataset.theme = t;
+    return shell(...a);
   };
 }
