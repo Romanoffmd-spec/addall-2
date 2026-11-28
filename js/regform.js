@@ -2,7 +2,7 @@
    1) Учреждение и отделение: в списках то, что добавил администратор; если своего нет, «Нет в списке» и поле для названия.
    2) Незаполненные обязательные поля подсвечиваются красным с подсказкой под полем.
    3) Почта: принимается любая (рабочая или личная).
-   4) Счётчики «сотрудников / пациентов»: карточки с иконками и плавным счётом.
+   4) Счётчики «сотрудников / пациентов»: карточки с анимацией (Motion и anime.js).
    Подключается последним, после fire.js и всех обёрток Pages.login. */
 'use strict';
 
@@ -12,19 +12,53 @@ const RegForm = {
     users: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
     patients: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M12 8v8M8 12h8"/></svg>'
   },
-  /* счётчики: иконка, число с плавным счётом, подпись */
+  /* счётчики: карточки в стиле shadcn (подпись, крупное число, строка статуса);
+     анимация: Motion (motion.dev) для появления на пружине, счёта и подсветки за курсором, anime.js для прорисовки иконок.
+     Библиотеки лежат в js/vendor (Motion 14, anime.js 4.5) и грузятся только на странице входа; если файлов нет, работает запасной счёт без библиотек. */
+  LIBS: { motion: 'js/vendor/motion.min.js', anime: 'js/vendor/anime.umd.min.js' },
+  lib(name, global) {
+    if (window[global]) return Promise.resolve(window[global]);
+    this._lib = this._lib || {};
+    return this._lib[name] = this._lib[name] || new Promise(res => {
+      const s = document.createElement('script'); s.src = this.LIBS[name]; s.async = true;
+      const t = setTimeout(() => res(null), 4000);
+      s.onload = () => { clearTimeout(t); res(window[global] || null); }; s.onerror = () => { clearTimeout(t); res(null); };
+      document.head.append(s);
+    });
+  },
   counters(box) {
     const wrap = box.querySelector('.lcount'); if (!wrap || wrap.dataset.rf) return;
     wrap.dataset.rf = '1'; wrap.classList.add('lcount2');
-    [...wrap.children].forEach((tile, i) => {
-      const b = tile.querySelector('b'); if (!b) return;
-      tile.insertAdjacentHTML('afterbegin', `<span class="lc-ic">${i ? this.ICONS.patients : this.ICONS.users}</span>`);
-      const n = Number(b.textContent) || 0;
-      if (n > 0 && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        const t0 = performance.now(), d = 900;
-        const step = t => { const k = Math.min(1, (t - t0) / d); b.textContent = Math.round(n * (1 - Math.pow(1 - k, 3))).toLocaleString('ru-RU'); if (k < 1) requestAnimationFrame(step); };
-        b.textContent = '0'; requestAnimationFrame(step);
-      } else b.textContent = n.toLocaleString('ru-RU');
+    const label = ['Сотрудники', 'Пациенты'], short = ['зарегистрировано', 'в регистрах'];
+    const tiles = [...wrap.children].map((tile, i) => {
+      const b = tile.querySelector('b'), sp = tile.querySelector('span'); if (!b) return null;
+      const n = Number(b.textContent) || 0, cap = sp ? sp.textContent : '';
+      tile.className = 'lc-tile'; tile.setAttribute('aria-label', n + ' ' + cap);
+      tile.innerHTML = `<span class="lc-glow" aria-hidden="true"></span><div class="lc-top"><span class="lc-ic">${i ? this.ICONS.patients : this.ICONS.users}</span><span class="lc-lab">${label[i] || ''}</span></div>
+        <b class="lc-num">${n.toLocaleString('ru-RU')}</b><span class="lc-cap">${short[i] || esc(cap)}</span><span class="lc-live"><i></i>в реальном времени</span>`;
+      tile.addEventListener('pointermove', e => { const r = tile.getBoundingClientRect(); tile.style.setProperty('--mx', (e.clientX - r.left) + 'px'); tile.style.setProperty('--my', (e.clientY - r.top) + 'px'); });
+      return { tile, n, num: tile.querySelector('.lc-num'), paths: [...tile.querySelectorAll('.lc-ic path, .lc-ic circle')] };
+    }).filter(Boolean);
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    wrap.classList.add('lc-pre');
+    const fallback = setTimeout(() => wrap.classList.remove('lc-pre'), 1500);
+    Promise.all([this.lib('motion', 'Motion'), this.lib('anime', 'anime')]).then(([M, A]) => {
+      clearTimeout(fallback);
+      wrap.classList.remove('lc-pre');
+      if (M && M.animate) {
+        tiles.forEach((t, i) => {
+          M.animate(t.tile, { opacity: [0, 1], y: [14, 0], scale: [0.96, 1] }, { type: 'spring', stiffness: 260, damping: 22, delay: 0.08 + i * 0.09 });
+          if (t.n > 0) { t.num.textContent = '0'; M.animate(0, t.n, { duration: 1.1, delay: 0.2 + i * 0.09, ease: [0.16, 1, 0.3, 1], onUpdate: v => { t.num.textContent = Math.round(v).toLocaleString('ru-RU'); } }); setTimeout(() => { t.num.textContent = t.n.toLocaleString('ru-RU'); }, 2600); }
+          t.tile.addEventListener('pointerenter', () => M.animate(t.tile, { y: -3 }, { type: 'spring', stiffness: 400, damping: 25 }));
+          t.tile.addEventListener('pointerleave', () => M.animate(t.tile, { y: 0 }, { type: 'spring', stiffness: 400, damping: 25 }));
+        });
+      } else {
+        tiles.forEach(t => { if (t.n > 0) { const t0 = performance.now(); const step = x => { const k = Math.min(1, (x - t0) / 900); t.num.textContent = Math.round(t.n * (1 - Math.pow(1 - k, 3))).toLocaleString('ru-RU'); if (k < 1) requestAnimationFrame(step); }; t.num.textContent = '0'; requestAnimationFrame(step); } });
+      }
+      if (A && A.animate && A.svg && A.svg.createDrawable) {
+        tiles.forEach((t, i) => { try { A.animate(A.svg.createDrawable(t.paths), { draw: ['0 0', '0 1'], duration: 900, delay: A.stagger ? A.stagger(90, { start: 200 + i * 120 }) : 200, ease: 'inOutQuad' }); } catch (e) { } });
+        try { A.animate(wrap.querySelectorAll('.lc-live i'), { scale: [1, 1.8, 1], opacity: [1, 0.35, 1], duration: 1800, loop: true, ease: 'inOutSine' }); } catch (e) { }
+      }
     });
   },
   /* учреждение и отделение «нет в списке» */
